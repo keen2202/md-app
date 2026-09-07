@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PRD §6.3 日间主题色板，1:1 落地。 -->
+<resources>
+    <color name="moread_background">#FAFAF7</color>
+    <color name="moread_card">#F1F0EB</color>
+    <color name="moread_text_primary">#2B2B2B</color>
+    <color name="moread_text_secondary">#6E6E6E</color>
+    <color name="moread_accent">#3A6EA5</color>
+    <color name="moread_code_text">#383A42</color>
+    <color name="moread_divider">#E2E1DC</color>
+    <color name="moread_code_keyword">#A626A4</color>
+    <color name="moread_code_string">#50A14F</color>
+    <color name="moread_code_comment">#A0A1A7</color>
+    <color name="moread_code_number">#986801</color>
+    <color name="moread_code_type">#C18401</color>
+    <color name="moread_code_function">#4078F2</color>
+    <color name="moread_code_plain">#383A42</color>
+    <color name="moread_overlay">#99000000</color>
+</resources>

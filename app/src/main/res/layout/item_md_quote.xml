@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal">
+
+    <View
+        android:id="@+id/md_quote_bar"
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="10dp"
+        android:background="@color/moread_accent" />
+
+    <TextView
+        android:id="@+id/md_quote_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:paddingStart="10dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="6dp"
+        android:textColor="@color/moread_text_primary"
+        android:textIsSelectable="true" />
+</LinearLayout>

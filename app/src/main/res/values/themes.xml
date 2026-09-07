@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MoRead" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/moread_accent</item>
+        <item name="colorPrimaryDark">@color/moread_background</item>
+        <item name="colorAccent">@color/moread_accent</item>
+        <item name="android:windowBackground">@color/moread_background</item>
+        <item name="android:statusBarColor">@color/moread_background</item>
+        <item name="android:navigationBarColor">@color/moread_background</item>
+        <item name="android:textColorPrimary">@color/moread_text_primary</item>
+        <item name="android:textColorSecondary">@color/moread_text_secondary</item>
+    </style>
+
+    <style name="Theme.MoRead.Reader">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
+    <style name="Widget.MoRead.Toolbar" parent="Widget.AppCompat.Toolbar">
+        <item name="android:background">@color/moread_background</item>
+        <item name="titleTextColor">@color/moread_text_primary</item>
+    </style>
+</resources>

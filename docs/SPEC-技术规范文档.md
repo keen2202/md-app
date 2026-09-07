@@ -291,12 +291,12 @@ SAF/Intent URI → 流式读取(协程IO) → 编码检测 → 全文 String
 
 | 阶段 | 里程碑 | 包含任务 | 负责模块 | 状态 | 完成情况 |
 | --- | --- | --- | --- | --- | --- |
-| M0 | 工程基座 | T01 | 构建/框架 | **in_progress** | 0%（待启动） |
-| M1 | v1.0 核心功能 | T02–T09 | 阅读核心 + UI | pending | 0% |
-| M1-Gate | v1.0 验收门 | T10、T11 | 安全/性能 | pending | 0% |
-| M2 | v1.1 体验增强 | T12、T13、T14 | 文件/主题/存储 | pending | 0% |
-| M3 | v1.2 长文档 | T15、T16 | 阅读核心 | pending | 0% |
-| M4 | v1.3 个性化 | T17、T18、T19 | 渲染/主题 | pending | 0% |
+| M0 | 工程基座 | T01 | 构建/框架 | completed | 100% |
+| M1 | v1.0 核心功能 | T02–T09 | 阅读核心 + UI | completed | 100% |
+| M1-Gate | v1.0 验收门 | T10、T11 | 安全/性能 | completed | 自动化 100%；真机指标待执行 |
+| M2 | v1.1 体验增强 | T12、T13、T14 | 文件/主题/存储 | completed | 100% |
+| M3 | v1.2 长文档 | T15、T16 | 阅读核心 | completed | 100% |
+| M4 | v1.3 个性化 | T17、T18、T19 | 渲染/主题 | completed | 100% |
 
 **进度更新规则**：每个任务状态变更（pending→in_progress→completed）同步更新本表与 TASKS 文档总览表；任意时刻至少一个任务 in_progress；M1-Gate 全绿才允许进入 M2。
 

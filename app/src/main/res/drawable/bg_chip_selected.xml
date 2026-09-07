@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/moread_card" />
+    <stroke android:width="2dp" android:color="@color/moread_accent" />
+    <corners android:radius="8dp" />
+</shape>
