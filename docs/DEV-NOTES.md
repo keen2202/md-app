@@ -47,7 +47,21 @@
 - `./gradlew :app:assembleRelease` → 成功；arm64-v8a 883KB
 - `./ci/check_no_network.sh` → uses-permission=0，网络 API=0，APK 权限审计空
 
-## 四、已知边界
+## 五、发布流水线（GitHub Actions）与处理决策
+
+| # | 决策点 | 处理方案 |
+| --- | --- | --- |
+| 1 | Release 触发方式 | 推送 `v*` tag 为主（`git tag v1.0.0 && git push origin v1.0.0`），`workflow_dispatch` 手动触发为辅；versionName 取 tag（去 v 前缀），versionCode 由 `x.y.z` 派生（`x*10000+y*100+z`），可用 `version-code` 输入覆盖；重复 tag 已存在 Release 时跳过发布仅留 Actions Artifact。 |
+| 2 | release 包签名 | 未配置 Secrets 时回退 debug 签名（可安装验证、不可上架，维持 T01 原取舍）；配置 `ANDROID_SIGNING_KEYSTORE_B64` 等 4 个 Secrets 后，CI 经 `SIGNING_*` 环境变量注入 keystore，Gradle 自动切换 "release" 签名并用 `apksigner` 校验；口令不落命令行参数（避免进程列表/日志泄露）。 |
+| 3 | Gradle 版本覆盖机制 | `app/build.gradle.kts` 支持 `-PversionName/-PversionCode` 与 `-Psigning.*`（或 `SIGNING_*` 环境变量）；本地不传参则行为与旧版完全一致（1.0/1 + debug 签名），无侵入。 |
+| 4 | CI 产物 | 上传 GitHub Release + Actions Artifact 双份：arm64 分包包、universal 包、R8 mapping、SHA-256 校验文件；CI 全流程复跑单测与 `ci/check_no_network.sh` 安全红线。 |
+| 5 | Wrapper 镜像可用性 | wrapper 仍走腾讯云镜像（SHA-256 已锁）；若 GitHub Runner 下载失败，改回 `services.gradle.org` 官方 URL 即可（校验和一致）。 |
+
+> 验证结果：本地已复现 CI 各步骤 —— `assembleRelease` 传参覆盖版本成功、
+> `SIGNING_*` 注入正式 keystore 后 `apksigner` 校验为注入证书、无签名配置时回退 debug
+> 签名、`ci/check_no_network.sh` 通过。真实 GitHub Runner 首次运行前无需任何额外配置。
+
+## 六、已知边界
 
 - 真机冷启动/内存/帧率与 SAF 图片子路径兼容性需在目标机型回归；
 - CommonMark 测试中 18 个失败例为参考渲染器与 spec.txt 的版本级差异，未影响主流程；

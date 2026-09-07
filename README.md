@@ -58,6 +58,37 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 > Gradle Wrapper 使用腾讯云 Gradle 镜像并配置 SHA-256 校验；如环境可直连
 > services.gradle.org，可改回官方 URL（校验和一致）。
 
+## 发布（GitHub Actions 打包 → GitHub Release）
+
+仓库内置 `.github/workflows/release.yml`，推送版本 tag 即自动「单测 → 安全红线检查 → R8
+打包 → 发布 GitHub Release」（约 5–10 分钟）：
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+- 版本取自 tag：`v1.2.3` → `versionName=1.2.3`，`versionCode` 按 `1*10000+2*100+3=10203`
+  派生（也可在手动触发时用 `version-code` 输入覆盖）。
+- Release 附件：`MoRead-<版本>-arm64-v8a.apk`（arm64 推荐包）、`MoRead-<版本>-universal.apk`
+  （通用包）、R8 `mapping.txt` 与 `SHA256SUMS-*.txt` 校验文件。
+- 也可手动触发：Actions → **Build & Publish Release** → Run workflow（填 `version`，
+  `prerelease` 打勾即预发布；版本含 `-` 如 `1.0.0-rc.1` 时自动标记预发布）。
+
+**正式签名（可选）**：默认 release 包回退 debug 签名（可安装验证、不可上架）。
+正式发布请在仓库 Settings → Secrets and variables → Actions 配置：
+
+| Secret | 内容 |
+| --- | --- |
+| `ANDROID_SIGNING_KEYSTORE_B64` | keystore 文件的 base64（单行，如 `base64 -w0 release.jks`） |
+| `ANDROID_SIGNING_STORE_PASSWORD` | keystore 口令 |
+| `ANDROID_SIGNING_KEY_ALIAS` | 签名 key 别名 |
+| `ANDROID_SIGNING_KEY_PASSWORD` | key 口令 |
+
+配置后 CI 自动以正式 keystore 签名并对 APK 做 `apksigner` 校验。生成正式 keystore 示例：
+`keytool -genkeypair -keystore release.jks -alias moread -keyalg RSA -keysize 2048 -validity 10950`。
+本地构建同样支持签名注入：`-Psigning.keystoreFile=… -Psigning.storePassword=…` 或
+`SIGNING_*` 环境变量（见 `app/build.gradle.kts` 顶部注释）。
+
 ## 验证方式
 
 1. **功能**：安装 APK → 首页空状态 → SAF 打开 `.md` → 阅读页渲染；
