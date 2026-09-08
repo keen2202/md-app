@@ -4,9 +4,14 @@ import com.moread.app.reader.parser.ast.BlockQuoteBlock
 import com.moread.app.reader.parser.ast.CodeBlock
 import com.moread.app.reader.parser.ast.HeadingBlock
 import com.moread.app.reader.parser.ast.HorizontalRuleBlock
+import com.moread.app.reader.parser.ast.InlineNodes
 import com.moread.app.reader.parser.ast.ListBlock
 import com.moread.app.reader.parser.ast.ParagraphBlock
 import com.moread.app.reader.parser.ast.TableBlock
+import com.moread.app.reader.outline.OutlineExtractor
+import com.moread.app.reader.render.HtmlExporter
+import com.moread.app.reader.render.RenderPipeline
+import com.moread.app.reader.render.SearchIndex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -76,6 +81,46 @@ class MarkdownParserTest {
         assertTrue(doc.flatten().isNotEmpty())
         val listDoc = parser.parse("1. ".repeat(5000) + "x")
         assertTrue(listDoc.flatten().isNotEmpty())
+    }
+
+    @Test fun `deeply nested inline emphasis does not overflow downstream render`() {
+        // 复现用户反馈：`*`/`**`/`~~` 深层嵌套会让 CommonMark AST 深度达到数千层，
+        // 即使解析成功，RenderPipeline / SpanFactory 的递归遍历也会在主线程 StackOverflow。
+        val inputs = listOf(
+            "*".repeat(2_000) + "a" + "*".repeat(2_000),
+            "**".repeat(2_000) + "a" + "**".repeat(2_000),
+            "~~".repeat(2_000) + "a" + "~~".repeat(2_000),
+        )
+        inputs.forEach { input ->
+            val doc = parser.parse(input)
+            assertTrue(doc.flatten().isNotEmpty())
+            // 深度上限内正常保留行内文本；超限部分压平为文本节点，不得丢字。
+            doc.flatten().filterIsInstance<ParagraphBlock>().forEach { paragraph ->
+                InlineNodes.plainText(paragraph.inline)
+            }
+            // 模拟阅读页完整消费链路，确保任何一步都不会递归栈溢出。
+            val model = RenderPipeline().build(doc)
+            SearchIndex(model)
+            OutlineExtractor.extract(doc)
+            HtmlExporter.renderCommonMark(doc)
+        }
+        var callbacks = 0
+        parser.parseStreaming(
+            text = inputs.first(),
+            onBlock = { callbacks++ },
+        )
+        assertTrue(callbacks > 0)
+    }
+
+    @Test fun `extreme nested inline input degrades without exception`() {
+        // 超过 commonmark-java 自身可承受的嵌套深度时，parse 内部会捕获 StackOverflow
+        // 并降级为纯文本块，保证阅读页仍能打开而不是闪退。
+        val input = "*".repeat(50_000) + "a" + "*".repeat(50_000)
+        val doc = parser.parse(input)
+        assertTrue(doc.flatten().isNotEmpty())
+        val text = doc.flatten().filterIsInstance<ParagraphBlock>().joinToString("") { InlineNodes.plainText(it.inline) }
+        assertTrue(text.contains("a"))
+        RenderPipeline().build(doc)
     }
 
     @Test fun `parseChunk returns blocks in line window`() {

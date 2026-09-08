@@ -26,6 +26,7 @@ import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.RecyclerView
 import com.moread.app.R
 import com.moread.app.file.ImageResolver
+import com.moread.app.log.AppLog
 import com.moread.app.reader.highlight.Highlighter
 import com.moread.app.reader.highlight.TokenType
 import com.moread.app.reader.parser.ast.CodeBlock
@@ -135,13 +136,23 @@ class ReaderAdapter(
 
     private fun bind(holder: RecyclerView.ViewHolder, position: Int, payloads: List<Any>) {
         val item = items[position]
-        when (holder) {
-            is TextHolder -> bindText(holder, item, position, heading = false)
-            is QuoteHolder -> bindText(holder, item, position, heading = false)
-            is CodeHolder -> bindCode(holder, item, position)
-            is TableHolder -> bindTable(holder, item, position)
-            is ImageHolder -> bindImage(holder, item, position)
-            is HrHolder -> holder.line.setBackgroundColor(palette.divider)
+        try {
+            when (holder) {
+                is TextHolder -> bindText(holder, item, position, heading = false)
+                is QuoteHolder -> bindText(holder, item, position, heading = false)
+                is CodeHolder -> bindCode(holder, item, position)
+                is TableHolder -> bindTable(holder, item, position)
+                is ImageHolder -> bindImage(holder, item, position)
+                is HrHolder -> holder.line.setBackgroundColor(palette.divider)
+            }
+        } catch (t: Throwable) {
+            AppLog.e(
+                "ReaderAdapter",
+                "bind failed position=$position, kind=${item.kind}, blocks=${item.blocks.size}, " +
+                    "indent=${item.indent}, quoteDepth=${item.quoteDepth}",
+                t,
+            )
+            throw t
         }
     }
 

@@ -2,6 +2,8 @@ package com.moread.app.reader.parser
 
 import com.moread.app.reader.parser.ast.DocumentBlock
 import com.moread.app.reader.parser.ast.MdBlock
+import com.moread.app.reader.parser.ast.ParagraphBlock
+import com.moread.app.reader.parser.ast.TextInline
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.parser.IncludeSourceSpans
@@ -32,8 +34,29 @@ class MarkdownParser {
             .build()
     }
 
-    /** 全量解析（CommonMark 参考引擎，容错零异常）。 */
-    fun parse(text: String): DocumentBlock {
+    /**
+     * 全量解析（CommonMark 参考引擎，容错零异常）。
+     *
+     * [onRecovered] 在触发降级解析时回调（调用方可记录日志）；普通调用无需传入。
+     */
+    fun parse(
+        text: String,
+        onRecovered: ((Throwable) -> Unit)? = null,
+    ): DocumentBlock {
+        return try {
+            parseCommonmark(text)
+        } catch (t: StackOverflowError) {
+            // commonmark-java 的深度嵌套行内结构可能递归溢出；超限输入降级为纯文本，
+            // 保证阅读页不因畸形 Markdown 闪退。
+            onRecovered?.invoke(t)
+            parseDegraded(text)
+        } catch (t: Exception) {
+            onRecovered?.invoke(t)
+            parseDegraded(text)
+        }
+    }
+
+    private fun parseCommonmark(text: String): DocumentBlock {
         val source = SourceLines(text)
         val document = commonmark.parse(text) as org.commonmark.node.Document
         val root = CommonmarkAstConverter(source).convert(document)
@@ -49,8 +72,9 @@ class MarkdownParser {
         text: String,
         shouldContinue: () -> Boolean = { true },
         onBlock: (MdBlock) -> Unit,
+        onRecovered: ((Throwable) -> Unit)? = null,
     ): DocumentBlock {
-        val root = parse(text)
+        val root = parse(text, onRecovered)
         for (block in root.blocks) {
             if (!shouldContinue()) break
             onBlock(block)
@@ -63,12 +87,18 @@ class MarkdownParser {
      * 供大文档边解析边渲染路径与解析器回归测试使用。
      */
     fun parseLegacy(text: String): DocumentBlock {
-        val source = SourceLines(text)
-        val context = ParseContext(source)
-        val root = DocumentBlock()
-        BlockParser(context).parseRange(0, source.lines.size, root.blocks, null)
-        root.assignBlockIndices()
-        return root
+        return try {
+            val source = SourceLines(text)
+            val context = ParseContext(source)
+            val root = DocumentBlock()
+            BlockParser(context).parseRange(0, source.lines.size, root.blocks, null)
+            root.assignBlockIndices()
+            root
+        } catch (t: StackOverflowError) {
+            parseDegraded(text)
+        } catch (t: Exception) {
+            parseDegraded(text)
+        }
     }
 
     /** 分段解析接口：按起始行区间返回块视图，供渲染层分批提交。 */
@@ -83,5 +113,51 @@ class MarkdownParser {
         return root.flatten().filter { block ->
             block.startLine in safeStart until safeEnd
         }
+    }
+
+    /**
+     * 极端畸形输入的安全降级：按字符上限切分为纯文本段落。
+     *
+     * 该路径只做线性扫描、不递归、不解析 Markdown，因此即使 commonmark 引擎
+     * 因深层嵌套栈溢出，也能保证 App 继续打开文档而不是闪退。
+     */
+    private fun parseDegraded(text: String): DocumentBlock {
+        val root = DocumentBlock()
+        if (text.isEmpty()) return root
+
+        val source = SourceLines(text)
+        var startOffset = 0
+        var startLine = 0
+        while (startOffset < text.length) {
+            var endOffset = (startOffset + MAX_DEGRADED_CHUNK_CHARS).coerceAtMost(text.length)
+            if (endOffset < text.length) {
+                // 尽量在换行处切分，避免破坏正常阅读节奏。
+                val newline = text.lastIndexOf('\n', endOffset - 1)
+                if (newline > startOffset) endOffset = newline + 1
+            }
+            val chunk = text.substring(startOffset, endOffset)
+            val block = ParagraphBlock(listOf(TextInline(chunk)), chunk)
+            block.startOffset = startOffset
+            block.endOffset = endOffset
+            while (startLine + 1 < source.lineStarts.size && source.lineStarts[startLine + 1] <= startOffset) {
+                startLine++
+            }
+            var endLine = startLine
+            while (endLine + 1 < source.lineStarts.size && source.lineStarts[endLine + 1] < endOffset) {
+                endLine++
+            }
+            block.startLine = startLine
+            block.endLine = endLine
+            root.blocks.add(block)
+            startOffset = endOffset
+            startLine = endLine
+        }
+        root.assignBlockIndices()
+        return root
+    }
+
+    private companion object {
+        /** 降级纯文本块的最大字符数，避免单个 TextView 过大。 */
+        const val MAX_DEGRADED_CHUNK_CHARS = 16 * 1024
     }
 }

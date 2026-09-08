@@ -55,9 +55,16 @@ import org.commonmark.node.ThematicBreak
  */
 class CommonmarkAstConverter(private val source: SourceLines) {
 
-    /** 防止畸形 Markdown 的深度嵌套容器在递归转换/遍历时触发 StackOverflow。 */
+    /**
+     * 防止畸形 Markdown 的深度嵌套在递归转换/遍历时触发 StackOverflow。
+     *
+     * 容器深度只限制块级结构；行内强调/链接/删除线同样可以构造出上千层嵌套，
+     * 转换后若继续被 RenderPipeline / SpanFactory 等递归消费，会在主线程栈溢出闪退。
+     * 因此行内结构也设置独立深度上限，超限内容降级为纯文本，保证内容不丢失。
+     */
     private companion object {
         const val MAX_CONTAINER_DEPTH = 128
+        const val MAX_INLINE_DEPTH = 128
     }
 
     fun convert(document: Document): DocumentBlock {
@@ -180,29 +187,48 @@ class CommonmarkAstConverter(private val source: SourceLines) {
         return out
     }
 
-    private fun convertInlines(first: Node?): List<MdInline> {
+    private fun convertInlines(first: Node?, depth: Int = 0): List<MdInline> {
         val out = ArrayList<MdInline>()
         var node = first
         while (node != null) {
-            convertInline(node)?.let { out.add(it) }
+            convertInline(node, depth)?.let { out.add(it) }
             node = node.next
         }
         return out
     }
 
-    private fun convertInline(node: Node): MdInline? = when (node) {
+    private fun convertInline(node: Node, depth: Int): MdInline? = when (node) {
         is Text -> TextInline(node.literal.orEmpty()).also { applyInlineMeta(it, node) }
-        is StrongEmphasis -> StrongInline(convertInlines(node.firstChild)).also { applyInlineMeta(it, node) }
-        is Emphasis -> EmphasisInline(convertInlines(node.firstChild)).also { applyInlineMeta(it, node) }
+        is StrongEmphasis -> {
+            if (depth >= MAX_INLINE_DEPTH) flattenedInline(node)
+            else StrongInline(convertInlines(node.firstChild, depth + 1)).also { applyInlineMeta(it, node) }
+        }
+        is Emphasis -> {
+            if (depth >= MAX_INLINE_DEPTH) flattenedInline(node)
+            else EmphasisInline(convertInlines(node.firstChild, depth + 1)).also { applyInlineMeta(it, node) }
+        }
         is Code -> com.moread.app.reader.parser.ast.CodeInline(node.literal.orEmpty()).also { applyInlineMeta(it, node) }
-        is Link -> LinkInline(node.destination.orEmpty(), node.title, convertInlines(node.firstChild)).also { applyInlineMeta(it, node) }
+        is Link -> {
+            if (depth >= MAX_INLINE_DEPTH) flattenedInline(node)
+            else LinkInline(node.destination.orEmpty(), node.title, convertInlines(node.firstChild, depth + 1)).also { applyInlineMeta(it, node) }
+        }
         is Image -> ImageInline(node.destination.orEmpty(), node.title.orEmpty()).also { applyInlineMeta(it, node) }
         is SoftLineBreak -> SoftBreakInline().also { applyInlineMeta(it, node) }
         is HardLineBreak -> HardBreakInline().also { applyInlineMeta(it, node) }
         is CmHtmlInline -> AstHtmlInline(node.literal.orEmpty()).also { applyInlineMeta(it, node) }
-        is Strikethrough -> StrikeInline(convertInlines(node.firstChild)).also { applyInlineMeta(it, node) }
+        is Strikethrough -> {
+            if (depth >= MAX_INLINE_DEPTH) flattenedInline(node)
+            else StrikeInline(convertInlines(node.firstChild, depth + 1)).also { applyInlineMeta(it, node) }
+        }
         else -> null
     }
+
+    /**
+     * 超过行内嵌套上限时，将剩余子树一次性压平为纯文本节点。
+     * 可见文字不丢失，同时阻断后续所有递归遍历的深度增长。
+     */
+    private fun flattenedInline(node: Node): TextInline =
+        TextInline(plainTextOf(node)).also { applyInlineMeta(it, node) }
 
     private fun firstInfoWord(info: String?): String {
         val s = info.orEmpty().trim()

@@ -161,20 +161,32 @@ class HtmlInline(val html: String) : MdInline()
 
 /** 解析异常兜底类型：任何无法识别的输入最终降级为段落或文本，不向外抛出。 */
 object InlineNodes {
+    /**
+     * 迭代式提取纯文本，显式栈避免畸形 Markdown 生成超深行内树时递归栈溢出。
+     * 输出顺序与递归前序遍历一致。
+     */
     fun plainText(list: List<MdInline>): String = buildString {
-        list.forEach { append(it.plainText()) }
+        val stack = ArrayDeque<MdInline>()
+        for (i in list.indices.reversed()) stack.addLast(list[i])
+        while (stack.isNotEmpty()) {
+            when (val node = stack.removeLast()) {
+                is TextInline -> append(node.text)
+                is StrongInline -> pushChildren(stack, node.children)
+                is EmphasisInline -> pushChildren(stack, node.children)
+                is StrikeInline -> pushChildren(stack, node.children)
+                is CodeInline -> append(node.code)
+                is LinkInline -> pushChildren(stack, node.children)
+                is ImageInline -> append(node.alt)
+                is SoftBreakInline -> append('\n')
+                is HardBreakInline -> append('\n')
+                is HtmlInline -> append(node.html)
+            }
+        }
     }
 
-    fun MdInline.plainText(): String = when (this) {
-        is TextInline -> text
-        is StrongInline -> children.joinToString("") { it.plainText() }
-        is EmphasisInline -> children.joinToString("") { it.plainText() }
-        is StrikeInline -> children.joinToString("") { it.plainText() }
-        is CodeInline -> code
-        is LinkInline -> children.joinToString("") { it.plainText() }
-        is ImageInline -> alt
-        is SoftBreakInline -> "\n"
-        is HardBreakInline -> "\n"
-        is HtmlInline -> html
+    private fun pushChildren(stack: ArrayDeque<MdInline>, children: List<MdInline>) {
+        for (i in children.indices.reversed()) stack.addLast(children[i])
     }
+
+    fun MdInline.plainText(): String = InlineNodes.plainText(listOf(this))
 }

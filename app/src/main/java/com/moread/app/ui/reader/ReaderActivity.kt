@@ -35,6 +35,7 @@ import com.moread.app.R
 import com.moread.app.file.DocumentLoader
 import com.moread.app.file.LARGE_DOCUMENT_BYTES
 import com.moread.app.file.RecentStore
+import com.moread.app.log.AppLog
 import com.moread.app.prefs.Prefs
 import com.moread.app.reader.outline.OutlineExtractor
 import com.moread.app.reader.parser.ast.DocumentBlock
@@ -122,18 +123,21 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.i("Reader", "onCreate start, intentData=${intent.data?.scheme ?: "null"}, extraName=${intent.getStringExtra(EXTRA_NAME)}")
         ThemeApplier.applyWindow(this, ThemeEngine.palette())
         setContentView(R.layout.activity_reader)
         bindViews()
 
         val uri = intent.data ?: intent.getStringExtra(EXTRA_URI)?.let { Uri.parse(it) }
         if (uri == null || (uri.scheme != "content" && uri.scheme != "file")) {
+            AppLog.e("Reader", "invalid uri: $uri")
             showError(getString(R.string.open_error))
             return
         }
         documentUri = uri
         documentName = intent.getStringExtra(EXTRA_NAME) ?: "未命名文档"
         immersive = Prefs.immersiveReader()
+        AppLog.i("Reader", "uri scheme=${uri.scheme}, name=$documentName")
 
         setupRecycler()
         setupBars()
@@ -263,11 +267,14 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     private fun loadDocument() {
         progressView.visibility = View.VISIBLE
         errorView.visibility = View.GONE
+        AppLog.i("Reader", "loadDocument start")
         lifecycleScope.launch {
+            val loadStart = SystemClock.elapsedRealtime()
             val result = try {
                 val metadata = withContext(Dispatchers.IO) {
                     DocumentLoader.queryMetadata(applicationContext, documentUri)
                 }
+                AppLog.i("Reader", "metadata query done, size=${metadata.second}, name=${metadata.first}")
                 if (metadata.second > LARGE_DOCUMENT_BYTES) {
                     Toast.makeText(this@ReaderActivity, R.string.large_file_hint, Toast.LENGTH_LONG).show()
                 }
@@ -275,6 +282,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
                     DocumentLoader.load(applicationContext, documentUri)
                 }
             } catch (e: Exception) {
+                AppLog.e("Reader", "loadDocument failed, scheme=${documentUri.scheme}", e)
                 val message = when {
                     e is com.moread.app.file.DocumentTooLargeException -> getString(R.string.file_too_large)
                     else -> getString(R.string.open_error)
@@ -282,6 +290,12 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
                 showError(message)
                 return@launch
             }
+            AppLog.i(
+                "Reader",
+                "loadDocument done: bytes=${result.sizeBytes}, encoding=${result.encoding}, " +
+                    "uncertain=${result.encodingUncertain}, textLen=${result.text.length}, " +
+                    "elapsedMs=${SystemClock.elapsedRealtime() - loadStart}",
+            )
             documentName = result.displayName
             originalText = result.text
             titleView.text = documentName
@@ -300,6 +314,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     private fun renderDocument(text: String) {
         parseCancelled.set(false)
         progressView.visibility = View.VISIBLE
+        AppLog.i("Reader", "renderDocument start, textLen=${text.length}")
         val parser = MarkdownParser()
         val pipeline = RenderPipeline()
         val mainHandler = Handler(Looper.getMainLooper())
@@ -314,30 +329,49 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
                 copy
             }
             if (parseCancelled.get()) return
-            if (readerAdapter.itemCount == 0) readerAdapter.submitItems(batch) else readerAdapter.appendItems(batch)
+            try {
+                if (readerAdapter.itemCount == 0) readerAdapter.submitItems(batch) else readerAdapter.appendItems(batch)
+            } catch (t: Throwable) {
+                AppLog.e("Reader", "flushPending failed, batch=${batch.size}, itemCount=${readerAdapter.itemCount}", t)
+                throw t
+            }
         }
 
         parseThread?.interrupt()
         parseThread = thread(name = "moread-markdown-parse") {
             var root: DocumentBlock? = null
             var parseFailed = false
+            val parseStart = SystemClock.elapsedRealtime()
             try {
-                root = parser.parseStreaming(text, { !parseCancelled.get() }) { block ->
-                    val batch = pipeline.buildBlocks(listOf(block))
-                    if (batch.isNotEmpty()) {
-                        synchronized(pending) { pending.addAll(batch) }
-                        val now = SystemClock.uptimeMillis()
-                        if (now - lastFlush >= 16 || pending.size >= 48) {
-                            lastFlush = now
-                            mainHandler.post { flushPending() }
+                root = parser.parseStreaming(
+                    text = text,
+                    shouldContinue = { !parseCancelled.get() },
+                    onBlock = { block ->
+                        val batch = pipeline.buildBlocks(listOf(block))
+                        if (batch.isNotEmpty()) {
+                            synchronized(pending) { pending.addAll(batch) }
+                            val now = SystemClock.uptimeMillis()
+                            if (now - lastFlush >= 16 || pending.size >= 48) {
+                                lastFlush = now
+                                mainHandler.post { flushPending() }
+                            }
                         }
-                    }
-                }
-            } catch (_: Throwable) {
+                    },
+                    onRecovered = { t ->
+                        AppLog.e("Parser", "commonmark parse degraded to plain text, textLen=${text.length}", t)
+                    },
+                )
+            } catch (t: Throwable) {
                 // 解析器自身容错；此处防御，避免畸形 Markdown 导致进程闪退。
+                AppLog.e("Parser", "parseStreaming failed, textLen=${text.length}", t)
                 parseFailed = true
             }
             val parsed = root
+            AppLog.i(
+                "Parser",
+                "parseStreaming done: ok=${parsed != null}, blocks=${parsed?.blocks?.size ?: -1}, " +
+                    "elapsedMs=${SystemClock.elapsedRealtime() - parseStart}",
+            )
             mainHandler.post {
                 if (!parseCancelled.get() && !isFinishing) {
                     if (parsed != null) {
@@ -351,16 +385,30 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     }
 
     private fun onParseFinished(root: DocumentBlock) {
-        document = root
-        val model = RenderPipeline().build(root)
-        renderModel = model
-        readerAdapter.submitItems(model.items)
-        searchIndex = SearchIndex(model)
+        val buildStart = SystemClock.elapsedRealtime()
+        AppLog.i("Reader", "onParseFinished start, blocks=${root.blocks.size}")
+        try {
+            document = root
+            val model = RenderPipeline().build(root)
+            renderModel = model
+            readerAdapter.submitItems(model.items)
+            searchIndex = SearchIndex(model)
 
-        val outline = OutlineExtractor.extract(root)
-        outlineAdapter.submit(outline.map { OutlineRow(it, model.itemIndexForBlock(it.blockIndex)) })
-        outlineEmpty.visibility = if (outline.isEmpty()) View.VISIBLE else View.GONE
-        outlineList.visibility = if (outline.isEmpty()) View.GONE else View.VISIBLE
+            val outline = OutlineExtractor.extract(root)
+            outlineAdapter.submit(outline.map { OutlineRow(it, model.itemIndexForBlock(it.blockIndex)) })
+            outlineEmpty.visibility = if (outline.isEmpty()) View.VISIBLE else View.GONE
+            outlineList.visibility = if (outline.isEmpty()) View.GONE else View.VISIBLE
+
+            AppLog.i(
+                "Reader",
+                "onParseFinished done: items=${model.items.size}, outline=${outline.size}, " +
+                    "elapsedMs=${SystemClock.elapsedRealtime() - buildStart}",
+            )
+        } catch (t: Throwable) {
+            AppLog.e("Reader", "onParseFinished failed, blocks=${root.blocks.size}", t)
+            showError(getString(R.string.open_error))
+            return
+        }
 
         progressView.visibility = View.GONE
         recycler.post {
@@ -624,6 +672,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     }
 
     override fun onDestroy() {
+        AppLog.i("Reader", "onDestroy, name=$documentName")
         parseCancelled.set(true)
         progressHandler.removeCallbacksAndMessages(null)
         searchHandler.removeCallbacksAndMessages(null)
@@ -632,6 +681,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     }
 
     private fun showError(message: String) {
+        AppLog.e("Reader", "showError: $message")
         progressView.visibility = View.GONE
         errorView.text = message
         errorView.visibility = View.VISIBLE
