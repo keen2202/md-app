@@ -55,12 +55,17 @@ import org.commonmark.node.ThematicBreak
  */
 class CommonmarkAstConverter(private val source: SourceLines) {
 
+    /** 防止畸形 Markdown 的深度嵌套容器在递归转换/遍历时触发 StackOverflow。 */
+    private companion object {
+        const val MAX_CONTAINER_DEPTH = 128
+    }
+
     fun convert(document: Document): DocumentBlock {
         val root = DocumentBlock()
         document.firstChild?.let { first ->
             var node: Node? = first
             while (node != null) {
-                val block = convertBlock(node)
+                val block = convertBlock(node, 0)
                 if (block != null) root.blocks.add(block)
                 node = node.next
             }
@@ -68,7 +73,7 @@ class CommonmarkAstConverter(private val source: SourceLines) {
         return root
     }
 
-    private fun convertBlock(node: Node): MdBlock? = when (node) {
+    private fun convertBlock(node: Node, depth: Int): MdBlock? = when (node) {
         is Heading -> HeadingBlock(node.level, convertInlines(node.firstChild), plainTextOf(node)).also { applyBlockMeta(it, node) }
         is Paragraph -> ParagraphBlock(convertInlines(node.firstChild), rawText(node)).also { applyBlockMeta(it, node) }
         is FencedCodeBlock -> CodeBlock(
@@ -85,23 +90,42 @@ class CommonmarkAstConverter(private val source: SourceLines) {
             rawText = rawText(node),
         ).also { applyBlockMeta(it, node) }
         is BlockQuote -> {
-            val children = childBlocks(node)
-            BlockQuoteBlock(children).also { applyBlockMeta(it, node) }
+            if (depth >= MAX_CONTAINER_DEPTH) {
+                val text = plainTextOf(node)
+                ParagraphBlock(listOf(TextInline(text)), text).also { applyBlockMeta(it, node) }
+            } else {
+                val children = childBlocks(node, depth + 1)
+                BlockQuoteBlock(children).also { applyBlockMeta(it, node) }
+            }
         }
-        is BulletList -> convertList(node, ordered = false, start = 1)
-        is OrderedList -> convertList(node, ordered = true, start = node.startNumber)
+        is BulletList -> {
+            if (depth >= MAX_CONTAINER_DEPTH) {
+                val text = plainTextOf(node)
+                ParagraphBlock(listOf(TextInline(text)), text).also { applyBlockMeta(it, node) }
+            } else {
+                convertList(node, ordered = false, start = 1, depth)
+            }
+        }
+        is OrderedList -> {
+            if (depth >= MAX_CONTAINER_DEPTH) {
+                val text = plainTextOf(node)
+                ParagraphBlock(listOf(TextInline(text)), text).also { applyBlockMeta(it, node) }
+            } else {
+                convertList(node, ordered = true, start = node.startNumber, depth)
+            }
+        }
         is ThematicBreak -> HorizontalRuleBlock(rawText(node)).also { applyBlockMeta(it, node) }
         is HtmlBlock -> ParagraphBlock(listOf(AstHtmlInline(node.literal.orEmpty())), node.literal.orEmpty()).also { applyBlockMeta(it, node) }
         is GfmTableBlock -> convertTable(node)
         else -> null
     }
 
-    private fun convertList(node: Node, ordered: Boolean, start: Int): ListBlock {
+    private fun convertList(node: Node, ordered: Boolean, start: Int, depth: Int): ListBlock {
         val items = ArrayList<ListItemBlock>()
         var child = node.firstChild
         while (child != null) {
             if (child is ListItem) {
-                val itemChildren = childBlocks(child)
+                val itemChildren = childBlocks(child, depth + 1)
                 val item = ListItemBlock(itemChildren)
                 applyBlockMeta(item, child)
                 items.add(item)
@@ -146,11 +170,11 @@ class CommonmarkAstConverter(private val source: SourceLines) {
         return TableCell(convertInlines(cell.firstChild), rawText(cell), align)
     }
 
-    private fun childBlocks(parent: Node): MutableList<MdBlock> {
+    private fun childBlocks(parent: Node, depth: Int): MutableList<MdBlock> {
         val out = ArrayList<MdBlock>()
         var child = parent.firstChild
         while (child != null) {
-            convertBlock(child)?.let { out.add(it) }
+            convertBlock(child, depth)?.let { out.add(it) }
             child = child.next
         }
         return out
@@ -227,7 +251,10 @@ class CommonmarkAstConverter(private val source: SourceLines) {
 
     private fun plainTextOf(node: Node): String {
         val sb = StringBuilder()
-        fun walk(n: Node) {
+        val stack = ArrayDeque<Node>()
+        stack.add(node)
+        while (stack.isNotEmpty()) {
+            val n = stack.removeLast()
             when (n) {
                 is Text -> sb.append(n.literal.orEmpty())
                 is Code -> sb.append(n.literal.orEmpty())
@@ -235,13 +262,12 @@ class CommonmarkAstConverter(private val source: SourceLines) {
                 is SoftLineBreak, is HardLineBreak -> sb.append('\n')
                 else -> Unit
             }
-            var child = n.firstChild
+            var child = n.lastChild
             while (child != null) {
-                walk(child)
-                child = child.next
+                stack.add(child)
+                child = child.previous
             }
         }
-        walk(node)
         return sb.toString()
     }
 }

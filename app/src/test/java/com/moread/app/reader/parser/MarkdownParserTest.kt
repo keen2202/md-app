@@ -71,6 +71,13 @@ class MarkdownParserTest {
         }
     }
 
+    @Test fun `deeply nested blockquote and list do not overflow`() {
+        val doc = parser.parse("> ".repeat(5000) + "x")
+        assertTrue(doc.flatten().isNotEmpty())
+        val listDoc = parser.parse("1. ".repeat(5000) + "x")
+        assertTrue(listDoc.flatten().isNotEmpty())
+    }
+
     @Test fun `parseChunk returns blocks in line window`() {
         val text = "# A\n\npara\n\n## B\n\npara2"
         val chunk = parser.parseChunk(text, 0, 2)

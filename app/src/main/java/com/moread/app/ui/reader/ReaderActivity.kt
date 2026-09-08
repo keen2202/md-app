@@ -320,6 +320,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
         parseThread?.interrupt()
         parseThread = thread(name = "moread-markdown-parse") {
             var root: DocumentBlock? = null
+            var parseFailed = false
             try {
                 root = parser.parseStreaming(text, { !parseCancelled.get() }) { block ->
                     val batch = pipeline.buildBlocks(listOf(block))
@@ -332,13 +333,18 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
                         }
                     }
                 }
-            } catch (_: Exception) {
-                // 解析器自身容错；此处防御。
+            } catch (_: Throwable) {
+                // 解析器自身容错；此处防御，避免畸形 Markdown 导致进程闪退。
+                parseFailed = true
             }
             val parsed = root
             mainHandler.post {
-                if (!parseCancelled.get() && !isFinishing && parsed != null) {
-                    onParseFinished(parsed)
+                if (!parseCancelled.get() && !isFinishing) {
+                    if (parsed != null) {
+                        onParseFinished(parsed)
+                    } else if (parseFailed) {
+                        showError(getString(R.string.open_error))
+                    }
                 }
             }
         }
