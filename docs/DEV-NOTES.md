@@ -43,7 +43,7 @@
 
 见 `README.md`「构建与运行」「验证方式」；自动化验证结果：
 
-- `./gradlew :app:testDebugUnitTest` → 全部通过（28 项测试，含 CommonMark 97.15%、fuzz 1000、编码、高亮、对比度、性能基线）
+- `./gradlew :app:testDebugUnitTest` → 全部通过（45 项测试，含 CommonMark 97.15%、fuzz 1000、编码、高亮、对比度、性能基线、表格列宽算法与表格布局契约）
 - `./gradlew :app:assembleRelease` → 成功；arm64-v8a 883KB
 - `./ci/check_no_network.sh` → uses-permission=0，网络 API=0，APK 权限审计空
 

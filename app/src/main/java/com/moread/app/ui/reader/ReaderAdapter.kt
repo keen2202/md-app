@@ -31,6 +31,7 @@ import com.moread.app.log.AppLog
 import com.moread.app.reader.highlight.Highlighter
 import com.moread.app.reader.highlight.TokenType
 import com.moread.app.reader.parser.ast.CodeBlock
+import com.moread.app.reader.parser.ast.ColumnAlign
 import com.moread.app.reader.parser.ast.HeadingBlock
 import com.moread.app.reader.parser.ast.ImageBlock
 import com.moread.app.reader.parser.ast.InlineNodes
@@ -42,6 +43,7 @@ import com.moread.app.reader.render.ImageViewerDialog
 import com.moread.app.reader.render.ItemKind
 import com.moread.app.reader.render.RenderItem
 import com.moread.app.reader.render.SearchHit
+import com.moread.app.reader.render.TableColumnSizer
 import com.moread.app.reader.render.span.SpanFactory
 import com.moread.app.theme.ThemeEngine
 
@@ -285,47 +287,122 @@ class ReaderAdapter(
 
     // ------------------------------------------------------------------ 表格
 
+    /**
+     * 表格渲染（SPEC §1.4：块内横向滚动、列宽按内容自适应）。
+     *
+     * 对齐要点（历史 bug：表头与表体、单元格之间列线不齐）：
+     * 1. 先量出每个单元格的**内容自然宽度**，由 [TableColumnSizer] 按列取最大值，
+     *    得到一组**所有行共用**的列宽 → 同一列的表头与表体必然对齐；
+     * 2. 单元格宽度固定为列宽（px），不再用 `width=0 + weight=1`：权重方案下每行按
+     *    「行宽 − 本行内容宽度」分配剩余空间，各行内容宽度不同 → 同一列在不同行宽度不同，
+     *    这正是表头与表体、单元格之间列线不齐的根因；
+     * 3. 行宽 = 各列宽之和，同一行内用 minHeight 取齐 → 长短单元格等高，边框不错位；
+     * 4. 列宽以最小宽度为下限，内容宽时压缩换行、内容窄时铺满；只有各列都压到下限
+     *    仍放不下时才横向滚动（列多或超长不可断内容）。
+     */
     private fun bindTable(holder: TableHolder, item: RenderItem, position: Int) {
         val block = item.primaryBlock as? TableBlock ?: return
         val container = holder.container
         container.removeAllViews()
         val hasSearch = searchHitsByItem.containsKey(position)
         container.setBackgroundColor(if (hasSearch) ColorUtils.setAlphaComponent(palette.accent, 48) else Color.TRANSPARENT)
-
-        fun cellView(cell: TableCell, header: Boolean): TextView {
-            val tv = TextView(context)
-            tv.setPadding(dp(12), dp(8), dp(12), dp(8))
-            tv.setTextColor(if (header) palette.textPrimary else palette.textPrimary)
-            tv.typeface = if (header) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            tv.textSize = 14f
-            tv.text = SpanFactory.build(cell.inline, palette, linkHandler, imageHandler = { url, alt -> onImageClick(url, alt) })
-            tv.gravity = when (cell.align) {
-                com.moread.app.reader.parser.ast.ColumnAlign.CENTER -> Gravity.CENTER
-                com.moread.app.reader.parser.ast.ColumnAlign.RIGHT -> Gravity.END
-                else -> Gravity.START
-            }
-            return tv
-        }
-
-        fun addRow(cells: List<TableCell>, header: Boolean) {
-            val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-            cells.forEach { cell ->
-                val tv = cellView(cell, header)
-                tv.background = colorDrawable(palette.card, 0)
-                row.addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            }
-            container.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }
-
-        addRow(block.headers, header = true)
-        block.rows.forEach { addRow(it, header = false) }
-
         val extraIndent = item.indent * dp(16)
         (holder.itemView as? HorizontalScrollView)?.setPadding(extraIndent, 0, 0, 0)
+
+        val rows: List<Pair<List<TableCell>, Boolean>> =
+            listOf(block.headers to true) + block.rows.map { it to false }
+        val columnCount = rows.maxOfOrNull { it.first.size } ?: 0
+        if (columnCount == 0) return
+
+        // 1) 建视图，并量出每个单元格在单行排版下的内容自然宽度（含内边距）。
+        val cellViews: List<List<TextView>> = rows.map { (cells, header) ->
+            cells.map { cell -> createCellView(cell, header) }
+        }
+        val naturalWidths: List<List<Int>> = cellViews.map { row ->
+            row.map { cell -> cell.naturalWidth() }
+        }
+
+        // 2) 一组列宽供所有行共用 → 表头与表体、行与行之间列线对齐。
+        val columnWidths = TableColumnSizer.columnWidths(
+            naturalWidths = naturalWidths,
+            availableWidth = tableAvailableWidth(holder, extraIndent),
+            minColumnWidth = dp(TableColumnSizer.MIN_COLUMN_WIDTH_DP),
+        )
+        val tableWidth = columnWidths.sum()
+
+        // 3) 按列宽铺行：单元格宽度固定，行内等高。
+        cellViews.forEach { cells ->
+            val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            var rowHeight = 0
+            cells.forEachIndexed { column, cell ->
+                val width = columnWidths.getOrElse(column) { columnWidths.last() }
+                rowHeight = maxOf(rowHeight, cell.heightAtWidth(width))
+                row.addView(cell, LinearLayout.LayoutParams(width, LinearLayout.LayoutParams.WRAP_CONTENT))
+            }
+            cells.forEach { it.minHeight = rowHeight }
+            container.addView(row, LinearLayout.LayoutParams(tableWidth, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
     }
 
-    private fun colorDrawable(color: Int, radius: Int): GradientDrawable =
-        GradientDrawable().apply { setColor(color); cornerRadius = radius.toFloat() }
+    /** 表格单元格：内边距、字号、对齐、表头加粗与网格边框统一在此设置。 */
+    private fun createCellView(cell: TableCell, header: Boolean): TextView {
+        val view = TextView(context)
+        view.setPadding(dp(10), dp(8), dp(10), dp(8))
+        view.setTextColor(palette.textPrimary)
+        view.typeface = if (header) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        view.textSize = 14f
+        view.text = SpanFactory.build(
+            cell.inline,
+            palette,
+            linkHandler,
+            imageHandler = { url, alt -> onImageClick(url, alt) },
+        )
+        view.gravity = when (cell.align) {
+            ColumnAlign.CENTER -> Gravity.CENTER
+            ColumnAlign.RIGHT -> Gravity.END
+            else -> Gravity.START
+        }
+        // 表头铺底色、表体透明，配合 1px 分隔线：列边界可见，列宽是否正确一眼可辨。
+        view.background = GradientDrawable().apply {
+            setColor(if (header) ColorUtils.setAlphaComponent(palette.card, HEADER_FILL_ALPHA) else Color.TRANSPARENT)
+            setStroke(maxOf(dp(1), 1), palette.divider)
+        }
+        return view
+    }
+
+    /** 单元格在单行排版下的内容自然宽度（px）。 */
+    private fun TextView.naturalWidth(): Int {
+        measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        return measuredWidth
+    }
+
+    /** 单元格在指定列宽下换行后的高度（px），用于行内取齐。 */
+    private fun TextView.heightAtWidth(width: Int): Int {
+        measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        return measuredHeight
+    }
+
+    /**
+     * 表格可用宽度（px）：优先用 RecyclerView 的真实内容宽度（分屏/平板同样正确），
+     * 首帧布局未完成时退回屏幕宽度估算。
+     * 需扣除：RecyclerView 左右内边距 + 表格外层 HorizontalScrollView 的 10dp 外边距 + 列表缩进。
+     */
+    private fun tableAvailableWidth(holder: TableHolder, extraIndent: Int): Int {
+        val parent = holder.itemView.parent as? View
+        val parentPadding = if (parent == null) 0 else parent.paddingLeft + parent.paddingRight
+        val measured = if (parent != null && parent.width > 0) {
+            parent.width - parentPadding
+        } else {
+            context.resources.displayMetrics.widthPixels - parentPadding
+        }
+        return (measured - dp(TABLE_OUTER_MARGIN_DP) - extraIndent).coerceAtLeast(dp(96))
+    }
 
     // ------------------------------------------------------------------ 图片
 
@@ -444,5 +521,11 @@ class ReaderAdapter(
         private const val TYPE_HR = 7
         private const val PAYLOAD_PALETTE = "palette"
         private const val PAYLOAD_FLASH = "flash"
+
+        /** 表头底色不透明度（0–255）：留一点透明度，文内搜索高亮能透出来。 */
+        private const val HEADER_FILL_ALPHA = 0xE6
+
+        /** item_md_table.xml 中 HorizontalScrollView 的左右外边距合计（10dp × 2）。 */
+        private const val TABLE_OUTER_MARGIN_DP = 20
     }
 }
