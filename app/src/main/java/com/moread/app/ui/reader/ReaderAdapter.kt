@@ -22,6 +22,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.annotation.IdRes
 import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.RecyclerView
 import com.moread.app.R
@@ -115,9 +116,15 @@ class ReaderAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val inflater = LayoutInflater.from(parent.context)
         return when (viewType) {
-            TYPE_HEADING -> TextHolder(inflater.inflate(R.layout.item_md_text, parent, false))
+            TYPE_HEADING -> TextHolder(
+                inflater.inflate(R.layout.item_md_text, parent, false),
+                R.id.md_text,
+            )
             TYPE_HEADING_QUOTE -> QuoteHolder(inflater.inflate(R.layout.item_md_quote, parent, false))
-            TYPE_PARAGRAPH -> TextHolder(inflater.inflate(R.layout.item_md_text, parent, false))
+            TYPE_PARAGRAPH -> TextHolder(
+                inflater.inflate(R.layout.item_md_text, parent, false),
+                R.id.md_text,
+            )
             TYPE_PARAGRAPH_QUOTE -> QuoteHolder(inflater.inflate(R.layout.item_md_quote, parent, false))
             TYPE_CODE -> CodeHolder(inflater.inflate(R.layout.item_md_code, parent, false))
             TYPE_TABLE -> TableHolder(inflater.inflate(R.layout.item_md_table, parent, false))
@@ -383,12 +390,25 @@ class ReaderAdapter(
 
     // ------------------------------------------------------------------ ViewHolder
 
-    open inner class TextHolder(view: View) : RecyclerView.ViewHolder(view) {
-        open val textView: TextView = view.findViewById(R.id.md_text)
+    /**
+     * 文本类 ViewHolder 基类。
+     *
+     * [textViewId] 必须由调用方传入**自身布局**里的 TextView id：
+     * 属性初始化发生在父类构造器内，若在基类里写死 `R.id.md_text`，
+     * 引用块布局（item_md_quote.xml 无 md_text）会在此处 findViewById 得到 null，
+     * Kotlin 平台类型空检查随即抛 NPE；而该异常发生在 onCreateViewHolder
+     * （不受 [bind] 的 try/catch 保护），会直接让阅读页闪退。
+     */
+    open inner class TextHolder(
+        view: View,
+        @IdRes textViewId: Int,
+    ) : RecyclerView.ViewHolder(view) {
+        open val textView: TextView = requireNotNull(view.findViewById<TextView>(textViewId)) {
+            "ViewHolder 布局缺少必需控件：id=0x${Integer.toHexString(textViewId)}"
+        }
     }
 
-    inner class QuoteHolder(view: View) : TextHolder(view) {
-        override val textView: TextView = view.findViewById(R.id.md_quote_text)
+    inner class QuoteHolder(view: View) : TextHolder(view, R.id.md_quote_text) {
         val bar: View = view.findViewById(R.id.md_quote_bar)
     }
 
