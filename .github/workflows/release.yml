@@ -201,7 +201,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: 墨阅 MoRead v${{ steps.version.outputs.version }}
-          body_file: release-body.md
+          body_path: release-body.md
           files: |
             app/build/outputs/apk/release/MoRead-*.apk
             app/build/outputs/apk/release/MoRead-*-mapping.txt
