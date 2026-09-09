@@ -18,6 +18,9 @@ local.properties
 token.txt
 token.sh
 
+# 正式签名材料（keystore 与口令，勿提交；请离线备份）
+.signing/
+
 # 系统与编辑器
 .DS_Store
 Thumbs.db
