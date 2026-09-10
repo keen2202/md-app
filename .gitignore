@@ -29,3 +29,7 @@ Thumbs.db
 
 # Kotlin 会话缓存
 .kotlin/
+
+# Python 工具缓存（tools/ 下的图标生成脚本）
+__pycache__/
+*.pyc
