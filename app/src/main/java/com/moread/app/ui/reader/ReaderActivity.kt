@@ -19,6 +19,7 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -33,6 +34,7 @@ import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import com.moread.app.R
 import com.moread.app.file.DocumentLoader
+import com.moread.app.file.EDIT_MAX_BYTES
 import com.moread.app.file.LARGE_DOCUMENT_BYTES
 import com.moread.app.file.RecentStore
 import com.moread.app.log.AppLog
@@ -50,6 +52,7 @@ import com.moread.app.reader.render.SearchIndex
 import com.moread.app.reader.render.span.SpanFactory
 import com.moread.app.theme.ThemeApplier
 import com.moread.app.theme.ThemeEngine
+import com.moread.app.ui.editor.EditorActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,6 +104,19 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     private var savedOffset = 0
 
     private val progressSaveRunnable = Runnable { saveProgressNow() }
+
+    private val editLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            if (!::documentUri.isInitialized) return@registerForActivityResult
+            val newUri = result.data?.data
+            if (newUri != null && newUri.toString() != documentUri.toString()) {
+                documentUri = newUri
+                documentName = getString(R.string.new_file_name)
+                titleView.text = documentName
+            }
+            reloadDocument()
+        }
 
     private val themeListener = object : ThemeEngine.ThemeListener {
         override fun onThemeChanged(event: ThemeEngine.ThemeChangeEvent) {
@@ -215,6 +231,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
     private fun setupBars() {
         findViewById<ImageButton>(R.id.reader_back).setOnClickListener { onBackPressedDispatcher.onBackPressed() }
         findViewById<ImageButton>(R.id.reader_outline).setOnClickListener { drawer.openDrawer(GravityCompat.END) }
+        findViewById<ImageButton>(R.id.reader_edit).setOnClickListener { openEditor() }
         findViewById<ImageButton>(R.id.reader_theme).setOnClickListener {
             ThemeEngine.toggleDayNight()
         }
@@ -309,6 +326,40 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
             }
             renderDocument(result.text)
         }
+    }
+
+    private fun openEditor() {
+        if (!::documentUri.isInitialized || document == null) return
+        lifecycleScope.launch {
+            val size = withContext(Dispatchers.IO) {
+                DocumentLoader.queryMetadata(applicationContext, documentUri).second
+            }
+            if (size > EDIT_MAX_BYTES) {
+                Toast.makeText(this@ReaderActivity, R.string.editor_too_large, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            editLauncher.launch(EditorActivity.intent(this@ReaderActivity, documentUri, documentName))
+        }
+    }
+
+    private fun reloadDocument() {
+        if (!::documentUri.isInitialized) return
+        parseCancelled.set(true)
+        readerAdapter.submitItems(emptyList())
+        outlineAdapter.submit(emptyList())
+        outlineEmpty.visibility = View.GONE
+        outlineList.visibility = View.GONE
+        document = null
+        renderModel = null
+        searchIndex = null
+        originalText = ""
+        readyForProgress = false
+        currentOutlineIndex = -1
+        searchHits = emptyList()
+        currentSearchIndex = -1
+        readerAdapter.clearSearch()
+        if (searchBar.visibility == View.VISIBLE) closeSearch()
+        loadDocument()
     }
 
     private fun renderDocument(text: String) {
@@ -632,7 +683,7 @@ class ReaderActivity : AppCompatActivity(), SpanFactory.LinkClickHandler {
         searchInput.setHintTextColor(palette.textSecondary)
         searchCount.setTextColor(palette.textSecondary)
         outlineEmpty.setTextColor(palette.textSecondary)
-        listOf(R.id.reader_back, R.id.reader_share, R.id.reader_immersive, R.id.reader_outline, R.id.reader_theme, R.id.reader_font, R.id.reader_search, R.id.search_close, R.id.search_prev, R.id.search_next).forEach {
+        listOf(R.id.reader_back, R.id.reader_edit, R.id.reader_share, R.id.reader_immersive, R.id.reader_outline, R.id.reader_theme, R.id.reader_font, R.id.reader_search, R.id.search_close, R.id.search_prev, R.id.search_next).forEach {
             findViewById<ImageButton>(it).imageTintList = ColorStateList.valueOf(palette.textPrimary)
         }
         readerAdapter.setPalette(palette)

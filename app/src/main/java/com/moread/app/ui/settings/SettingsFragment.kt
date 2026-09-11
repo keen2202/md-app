@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.moread.app.R
+import com.moread.app.file.DraftStore
 import com.moread.app.file.RecentStore
 import com.moread.app.theme.AccentPreset
 import com.moread.app.theme.ReaderFont
@@ -174,6 +175,14 @@ class SettingsFragment : Fragment() {
             tag = "clearRecent"
         })
 
+        // 编辑
+        content.addView(sectionTitle(getString(R.string.editing)))
+        content.addView(Button(requireContext()).apply {
+            text = getString(R.string.clear_drafts)
+            setOnClickListener { confirmClearDrafts() }
+            tag = "clearDrafts"
+        })
+
         // 关于
         content.addView(sectionTitle(getString(R.string.about)))
         content.addView(infoRow(getString(R.string.version), versionName()))
@@ -218,6 +227,18 @@ class SettingsFragment : Fragment() {
         }
         chipGroups[key] = chips
         content.addView(row)
+    }
+
+    private fun confirmClearDrafts() {
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.clear_drafts)
+            .setMessage(R.string.clear_drafts_confirm)
+            .setPositiveButton(R.string.remove) { _, _ ->
+                DraftStore.clearAll(requireContext())
+                Toast.makeText(requireContext(), R.string.drafts_cleared, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun confirmClearRecent() {

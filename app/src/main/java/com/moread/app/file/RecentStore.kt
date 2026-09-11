@@ -47,11 +47,19 @@ object RecentStore {
         }
     }
 
-    /** 打开成功时调用：插入/刷新记录并持久化 URI 读授权。 */
+    /** 打开/保存成功时调用：插入或刷新记录，同时保留已有阅读进度。 */
     fun recordOpened(context: Context, uri: Uri, name: String): RecentDoc {
         val list = all(context).toMutableList()
+        val existing = list.firstOrNull { it.uri == uri }
         list.removeAll { it.uri == uri }
-        val doc = RecentDoc(uri, name, System.currentTimeMillis(), missing = false)
+        val doc = RecentDoc(
+            uri = uri,
+            name = name,
+            lastOpened = System.currentTimeMillis(),
+            progressBlockIndex = existing?.progressBlockIndex ?: -1,
+            progressOffset = existing?.progressOffset ?: 0,
+            missing = false,
+        )
         list.add(0, doc)
         save(context, list.take(MAX_ITEMS))
         return doc

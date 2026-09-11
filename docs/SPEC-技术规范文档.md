@@ -3,12 +3,12 @@
 | 项目 | 内容 |
 | --- | --- |
 | 关联文档 | `docs/PRD-产品设计文档.md`（需求源）、`docs/TASKS-任务分解文档.md`（执行视图） |
-| 版本 | v1.0 |
+| 版本 | v1.1.0（含一期轻编辑） |
 | 平台基线 | Android 8.0（API 26）+，Kotlin，原生 View 体系 |
 | 文档状态 | 可指导开发 |
-| 最后更新 | 2026-09-07 |
+| 最后更新 | 2026-09-11 |
 
-**编号规则**：任务 ID = `T01`–`T19`（详见 TASKS 文档）；功能 ID = `F-01`–`F-13`（源自 PRD §4.1）；规范章节 = 本文档 `§1`–`§7`。三方双向可追溯。
+**编号规则**：任务 ID = `T01`–`T27`（详见 TASKS 文档）；功能 ID = `F-01`–`F-22`（源自 PRD §4.1）；规范章节 = 本文档 `§1`–`§7`。三方双向可追溯。
 
 ---
 
@@ -29,6 +29,15 @@
 | F-11 导出/分享 | P2 | §1.3、§2.2、§5 | T17 | v1.3 |
 | F-12 自定义强调色 | P2 | §1.6、§5 | T18 | v1.3 |
 | F-13 字体选择 | P2 | §1.6、§5 | T19 | v1.3 |
+| F-14 进入编辑 | P0 | §1.8、§3.2、§5 | T20 | v1.1.0 |
+| F-15 Markdown 源码编辑 | P0 | §1.8、§4.4、§5 | T21 | v1.1.0 |
+| F-16 格式工具栏 | P0 | §1.8、§7.1 | T22 | v1.1.0 |
+| F-17 保存/另存为 | P0 | §1.8、§2.2、§4.4 | T23 | v1.1.0 |
+| F-18 新建 Markdown | P0 | §1.8、§3.4 | T23 | v1.1.0 |
+| F-19 同页预览 | P0 | §1.8、§3.4 | T24 | v1.1.0 |
+| F-20 离开保护 | P0 | §1.8 | T21/T23 | v1.1.0 |
+| F-21 编码与换行保持 | P0 | §1.8、§2.3 | T20 | v1.1.0 |
+| F-22 草稿兜底 | P0 | §1.8、§2.2 | T25 | v1.1.0 |
 | 红线：零权限/纯离线/零追踪 | — | §2.1、§2.3、§7.2 | T01、T10 | v1.0 验收门 |
 | 性能指标（PRD §7.1） | — | §4.1、§7.3 | T01、T11、T16 | v1.0 验收门 |
 | 容错与稳定性（PRD §8） | — | §1.2、§2.3、§7.4 | T02、T10 | 全周期 |
@@ -125,6 +134,18 @@ com.moread.app/
 
 ---
 
+### 1.8 本地轻编辑模块（F-14 ~ F-22，T20 ~ T27）
+
+- **页面**：新增独立 `ui/editor/EditorActivity`，阅读页顶栏进入；编辑页不导出、不新增权限；
+- **编辑**：原生 `EditText` 等宽文本区；`editor/MarkdownEditCommands` 以纯函数实现选区/行级格式命令，JVM 单测覆盖；
+- **预览**：编辑页内切换「编辑/预览」，复用 `MarkdownParser → RenderPipeline → ReaderAdapter`，不引入 WebView；
+- **文件写入**：`file/DocumentWriter` 通过 SAF 单文件 URI 读写；content URI 优先 `rw + truncate`，回退 `wt`；`file://` 仅在可写时直写；
+- **编码保持**：`file/DocumentTextCodec` 在 1.7 的编码识别之上记录 charset/BOM/换行，保存时尽量原样写回；UTF-8-FALLBACK 或无法严格编码时只允许 UTF-8 另存为；
+- **草稿**：`file/DraftStore` 写入应用私有 `filesDir/editor_drafts/`，编辑中防抖保存、写入失败保留、成功保存后清理；
+- **大小限制**：阅读上限仍 20MB；一期可编辑原始字节 ≤ 1MB（`DocumentLoader.EDIT_MAX_BYTES`），超出保持只读；
+- **权限流程**：阅读入口仍只读授权；编辑前检查 `DocumentWriter.canWrite`，无写权限时弹窗「重新授权 / 只读编辑 / 取消」，重新授权使用带 READ|WRITE 的 `ACTION_OPEN_DOCUMENT`，不申请任何系统权限。
+
+
 ## §2 安全设计
 
 ### 2.1 零权限模型（红线，T01/T10）
@@ -174,7 +195,7 @@ com.moread.app/
 
 ```
 ┌─────────────────────────────────────────────┐
-│ UI 层     Home / Reader(抽屉+工具条) / Settings │
+│ UI 层     Home / Reader(抽屉+工具条) / Editor / Settings │
 ├─────────────────────────────────────────────┤
 │ 应用服务层  ThemeEngine / RecentStore / Prefs    │
 ├─────────────────────────────────────────────┤
@@ -194,6 +215,8 @@ com.moread.app/
 | 主题 | Settings/工具条 → ThemeEngine → 全局色板广播 → 各页增量刷新 | F-04，无 recreate |
 | 高亮 | RenderPipeline 遇代码块 → Highlighter → Span | F-02 |
 | 进度 | Reader UI 滚动位置 → RecentStore → 下次打开恢复 | F-07 |
+| 编辑保存 | Editor UI → DocumentTextCodec → DocumentWriter → SAF URI | F-14~F-22 |
+| 编辑预览 | Editor UI → MarkdownParser → RenderPipeline → ReaderAdapter | F-19 |
 
 ### 3.4 关键数据流（打开文档）
 
@@ -203,6 +226,18 @@ SAF/Intent URI → 流式读取(协程IO) → 编码检测 → 全文 String
   → AST → OutlineExtractor（并行）
   → RenderPipeline 首屏块优先提交 → RecyclerView
   → 剩余块后台分批提交（每批 ≤16ms 预算）
+```
+
+编辑数据流：
+
+```
+Editor UI（EditText, ≤1MB）
+  → MarkdownEditCommands（选区/行级格式）
+  → 预览：MarkdownParser → RenderPipeline → ReaderAdapter
+  → 保存：DocumentTextCodec.encode（保持编码/换行）
+  → DraftStore.save（覆盖写前快照）
+  → DocumentWriter.write（SAF 目标 URI）
+  → 成功清理草稿 / 失败保留草稿
 ```
 
 ---
@@ -221,6 +256,9 @@ SAF/Intent URI → 流式读取(协程IO) → 编码检测 → 全文 String
 | 首屏渲染（500KB） | ≤300ms | ≤500ms | T02/T03 |
 | 大文档滚动（2MB） | ≥55fps | ≥45fps | T16 |
 | 单代码块高亮 | <16ms | <33ms | T04 |
+| 编辑打开（500KB） | ≤800ms | ≤1200ms | T21 |
+| 编辑滚动（≤1MB） | ≥50fps | ≥40fps | T21 |
+| 保存写入（1MB） | ≤500ms | ≤1000ms | T23 |
 
 ### 4.2 优化策略
 
@@ -280,8 +318,16 @@ SAF/Intent URI → 流式读取(协程IO) → 编码检测 → 全文 String
 | 30 | `test/reader/parser/*` `highlight/*` | CommonMark spec.txt 用例 + 高亮单测 + fuzz | T02/T04/T10 |
 | 31 | `ci/check_no_network.sh` | CI 静态检查：manifest 权限数=0、网络 API 零引用 | T10 |
 | 32 | `benchmark/`（macrobenchmark） | 冷启动/渲染/滚动帧率自动化测量 | T11/T16 |
+| 33 | `ui/editor/EditorActivity.kt` + `res/layout/activity_editor.xml` | 编辑页：源码编辑、预览、格式栏、保存/另存为/新建、离开保护 | T21~T24 |
+| 34 | `editor/MarkdownEditCommands.kt` | 纯函数 Markdown 格式命令（可 JVM 单测） | T22 |
+| 35 | `file/DocumentTextCodec.kt` | 编辑编码/BOM/换行保持与严格编码结果 | T20 |
+| 36 | `file/DocumentWriter.kt` | SAF 覆盖写/另存为底层、写权限检查、回退策略 | T23 |
+| 37 | `file/DraftStore.kt` | 应用私有编辑草稿存储、恢复与清理 | T25 |
+| 38 | `ui/reader/ReaderActivity.kt`（改） | 编辑入口、保存后重载、1MB 编辑上限提示 | T20/T24 |
+| 39 | `ui/home/HomeFragment.kt`（改） | 首页「新建 Markdown」入口 | T23 |
+| 40 | `ui/settings/SettingsFragment.kt`（改） | 清除编辑草稿入口 | T25 |
 
-**修改文件**：无（全新项目）。后续版本新增功能（T12–T19）对应在 #20/#22/#23/#25/#26 上增量修改，已在上表标注。
+**修改文件**：v1.1.0 编辑一期在 #2/#5/#21/#22/#24、#33~#40 上增量修改。
 
 ---
 
@@ -297,6 +343,7 @@ SAF/Intent URI → 流式读取(协程IO) → 编码检测 → 全文 String
 | M2 | v1.1 体验增强 | T12、T13、T14 | 文件/主题/存储 | completed | 100% |
 | M3 | v1.2 长文档 | T15、T16 | 阅读核心 | completed | 100% |
 | M4 | v1.3 个性化 | T17、T18、T19 | 渲染/主题 | completed | 100% |
+| M5 | v1.1.0 本地轻编辑 | T20~T27 | 编辑/文件/UI | in_progress（T26 真机回归） | JVM 单测 + lint + Debug/Release 构建通过 |
 
 **进度更新规则**：每个任务状态变更（pending→in_progress→completed）同步更新本表与 TASKS 文档总览表；任意时刻至少一个任务 in_progress；M1-Gate 全绿才允许进入 M2。
 
@@ -320,6 +367,14 @@ SAF/Intent URI → 流式读取(协程IO) → 编码检测 → 全文 String
 | F-10 编码 | 单测 | UTF-8（含/无 BOM）、GBK、GB18030、乱码文件 | 中文零乱码；无法识别时兜底 + Toast |
 | F-11 导出 | UI 测试 + 手动 | HTML 导出在浏览器打开样式正确；原文分享 | 系统分享面板正常调起 |
 | F-12/F-13 个性化 | UI 测试 | 强调色 3–5 色、字体 3 种切换 | 全局即时生效并持久化 |
+| F-14 进入编辑 | UI 测试 + 手动 | 可写/只读/超大/编码不确定四种入口 | 统一按 §1.8 与 PRD 流程 5 表现 |
+| F-15 源码编辑 | UI 测试 | 增删改、选区、IME、主题切换 | 文本不丢，主题即时生效 |
+| F-16 格式工具 | 单测（文本+光标断言） | 10 类命令 × 空选区/多行/已加标记 | 与 MarkdownEditCommandsTest 一致 |
+| F-17 保存/另存为 | 单测 + 手工 | content/file URI、失败回退、provider 只读 | 保存内容/编码/换行正确；失败草稿保留 |
+| F-18 新建 | UI 测试 + 手动 | 不保存退出、首次保存、最近列表刷新 | 不产生空文件；保存后可再次打开 |
+| F-19 预览 | UI 测试 | 空文档、标题/列表/表格/代码/图片、链接复制 | 与阅读页渲染一致 |
+| F-21 编码保持 | 单测 | UTF-8/BOM/UTF-16/GB18030、CRLF、不可表示字符 | DocumentTextCodecTest 全绿 |
+| F-22 草稿兜底 | 单测 + 手动 | 杀进程重开、保存失败、清除草稿 | 可恢复，不回写原文件 |
 
 ### 7.2 安全合规验证（红线，T10，v1.0 发布前置）
 

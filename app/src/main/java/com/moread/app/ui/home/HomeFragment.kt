@@ -22,6 +22,7 @@ import com.moread.app.file.RecentDoc
 import com.moread.app.file.RecentStore
 import com.moread.app.theme.ThemeApplier
 import com.moread.app.theme.ThemeEngine
+import com.moread.app.ui.editor.EditorActivity
 import com.moread.app.ui.reader.ReaderActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,6 +40,7 @@ class HomeFragment : Fragment() {
     private lateinit var titleView: TextView
     private lateinit var openButton: Button
     private lateinit var openFileButton: ImageButton
+    private lateinit var newButton: ImageButton
     private lateinit var settingsButton: ImageButton
 
     private val openDocument =
@@ -80,6 +82,7 @@ class HomeFragment : Fragment() {
         titleView = root.findViewById(R.id.home_title)
         openButton = root.findViewById(R.id.home_open_button)
         openFileButton = root.findViewById(R.id.home_open_file)
+        newButton = root.findViewById(R.id.home_new)
         settingsButton = root.findViewById(R.id.home_settings)
 
         adapter = RecentAdapter(
@@ -92,6 +95,7 @@ class HomeFragment : Fragment() {
         root.findViewById<View>(R.id.home_top_bar).setOnClickListener { }
         openButton.setOnClickListener { openDocument.launch(arrayOf("text/*")) }
         openFileButton.setOnClickListener { openDocument.launch(arrayOf("text/*")) }
+        newButton.setOnClickListener { startActivity(EditorActivity.newDocumentIntent(requireContext())) }
         settingsButton.setOnClickListener { (activity as? MainActivity)?.showSettings() }
         applyColors()
         return root
@@ -159,6 +163,7 @@ class HomeFragment : Fragment() {
         emptyView.findViewById<TextView>(R.id.home_empty_subtitle).setTextColor(palette.textSecondary)
         openButton.backgroundTintList = ColorStateList.valueOf(palette.accent)
         openFileButton.imageTintList = ColorStateList.valueOf(palette.textPrimary)
+        newButton.imageTintList = ColorStateList.valueOf(palette.textPrimary)
         settingsButton.imageTintList = ColorStateList.valueOf(palette.textPrimary)
     }
 

@@ -14,6 +14,9 @@
 | 8 | T03 要求图片点击全屏双指缩放且不引入大图库 | SPEC §1.3 | 已实现自绘 `ZoomImageView`（Matrix + ScaleGestureDetector + 双击），图片解码长边 ≤2048px。 |
 | 9 | F-11 分享后临时文件删除时机系统不回调 | SPEC §1.7/§2.2 | 每次分享前清理旧临时文件，本次文件在分享面板返回后延时 5 分钟清理，兼顾接收方读取与隐私。 |
 | 10 | SPEC §5 将 8 类 ViewHolder 列为独立文件，并将搜索栏列为 `SearchBar.kt` | SPEC §5 #10/#20 | 为降低样板代码与跨类回调成本，ViewHolder 以类型化内部类集中实现于 `ReaderAdapter.kt`，搜索栏控件直接落地于 `activity_reader.xml` 并由 `ReaderActivity` 管理；对外交互与功能接口与 SPEC 一致。 |
+| 11 | PRD §1.1/§4.2 原将编辑列为非目标，但业务确认要增加「md 编辑」 | PRD §1.1/§4.2 vs v1.1.0 需求 | 定位调整为「阅读优先的本地轻编辑」，一期只做源码编辑/预览/保存，不做富文本、多文件管理、云同步；关键决策见 `docs/PLAN-Markdown编辑功能方案.md`。 |
+| 12 | 一期编辑大小上限与 SAF 写回安全 | 方案审核决策 | 原始字节 ≤1MB 才可编辑；覆盖保存前先写应用私有草稿，content URI 优先 `rw + truncate`、失败回退 `wt`；编码不可靠时仅允许 UTF-8 另存为。 |
+| 13 | 表格/图片插入的范围 | 方案审核第 7 点 | 放二期，一期格式栏只提供 10 个基础命令，避免滑向表格结构编辑器。 |
 
 ## 二、任务完成清单（T01–T19）
 
@@ -38,6 +41,14 @@
 | T17 | 分享原文/渲染 HTML + FileProvider + 缓存清理 | completed |
 | T18 | 强调色 5 色可选，对比度 ≥4.5 | completed |
 | T19 | 阅读字体 3 种（系统族），代码块锁等宽 | completed |
+| T20 | 编辑编码与文件写入基础（DocumentTextCodec/DocumentWriter） | completed：JVM 单测覆盖编码往返与不可表示字符 |
+| T21 | 编辑页与源码编辑（EditorActivity） | completed：1MB 上限、只读重新授权、未保存保护 |
+| T22 | 格式命令与工具栏（MarkdownEditCommands） | completed：10 个命令，单测通过 |
+| T23 | 保存/另存为/新建 | completed：SAF 覆盖/另存为、首页新建、阅读页重载 |
+| T24 | 同页预览与阅读回跳 | completed：复用原生渲染链路 |
+| T25 | 草稿恢复与设置入口 | completed：私有目录草稿、恢复/丢弃、设置页清理 |
+| T26 | 编辑专项测试与真机回归 | in_progress：JVM 单测/lint/Debug 构建通过；真机 provider/IME/性能待执行 |
+| T27 | 文档与版本发布配置 | completed：PRD/SPEC/TASKS/README 与 v1.1.0 对齐 |
 
 ## 三、运行与验证
 

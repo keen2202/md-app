@@ -16,6 +16,9 @@ const val MAX_DOCUMENT_BYTES = 20L * 1024L * 1024L
 /** 大文件提示阈值（PRD §5.3）。 */
 const val LARGE_DOCUMENT_BYTES = 5L * 1024L * 1024L
 
+/** 一期编辑上限：原始字节 ≤ 1MB；超过后仅阅读（方案 §4.3）。 */
+const val EDIT_MAX_BYTES = 1L * 1024L * 1024L
+
 data class LoadedDocument(
     val uri: Uri,
     val displayName: String,
@@ -64,18 +67,8 @@ object DocumentLoader {
         uri: Uri,
         onProgress: (Float) -> Unit = {},
     ): LoadedDocument {
-        val (name, size) = queryMetadata(context, uri)
-        if (size > MAX_DOCUMENT_BYTES) throw DocumentTooLargeException()
-
-        val bytes = try {
-            readBytes(context, uri, size, onProgress)
-        } catch (e: DocumentTooLargeException) {
-            throw e
-        } catch (e: Exception) {
-            throw DocumentOpenException("读取文档失败: ${e.message ?: "未知错误"}", e)
-        }
-        if (bytes.size > MAX_DOCUMENT_BYTES) throw DocumentTooLargeException()
-
+        val (name, _) = queryMetadata(context, uri)
+        val bytes = loadBytes(context, uri, onProgress)
         val decoded = EncodingDetector.decode(bytes)
         return LoadedDocument(
             uri = uri,
@@ -85,6 +78,29 @@ object DocumentLoader {
             encodingUncertain = decoded.uncertain,
             sizeBytes = bytes.size.toLong(),
         )
+    }
+
+    /**
+     * 读取原始字节，供编辑能力保存时做编码保持。
+     * 仍遵守 20MB 阅读硬上限；超过 1MB 的编辑上限由 EditorActivity 判断。
+     */
+    fun loadBytes(
+        context: Context,
+        uri: Uri,
+        onProgress: (Float) -> Unit = {},
+    ): ByteArray {
+        val (_, knownSize) = queryMetadata(context, uri)
+        if (knownSize > MAX_DOCUMENT_BYTES) throw DocumentTooLargeException()
+
+        val bytes = try {
+            readBytes(context, uri, knownSize, onProgress)
+        } catch (e: DocumentTooLargeException) {
+            throw e
+        } catch (e: Exception) {
+            throw DocumentOpenException("读取文档失败: ${e.message ?: "未知错误"}", e)
+        }
+        if (bytes.size > MAX_DOCUMENT_BYTES) throw DocumentTooLargeException()
+        return bytes
     }
 
     private fun readBytes(

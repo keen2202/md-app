@@ -1,14 +1,15 @@
-# 墨阅 MoRead — Markdown 阅读器
+# 墨阅 MoRead — Markdown 阅读与轻编辑
 
-一款超轻量、纯离线、零权限的 Android Markdown 阅读器。设计文档见 `docs/`：
-`PRD-产品设计文档.md`、`SPEC-技术规范文档.md`、`TASKS-任务分解文档.md`。
+一款超轻量、纯离线、零权限的 Android Markdown 阅读与轻编辑工具。设计文档见 `docs/`：
+`PRD-产品设计文档.md`、`SPEC-技术规范文档.md`、`TASKS-任务分解文档.md`；
+编辑方案见 `PLAN-Markdown编辑功能方案.md`。
 
 品牌图标「墨井」：Markdown 的标题标记 `#` 在中文排版里叫「井字号」，
 写成书法四笔的「井」，井心悬一滴强调蓝的墨——规范见 `docs/BRAND-图标设计规范.md`，
 几何唯一来源与自检脚本为 `tools/gen_launcher_icon.py`，
 CI 由 `ci/check_launcher_icon.sh` 守门（几何硬指标 + res 与设计源逐字节一致 + manifest 入口接线）。
 
-## 功能实现（PRD F-01 ~ F-13 全部落地）
+## 功能实现（PRD F-01 ~ F-22 全部落地）
 
 - Markdown 渲染：标题/段落/嵌套列表/GFM 表格/引用/分割线/本地图片/行内与围栏代码/链接/粗斜体/删除线
 - 代码高亮：内置 Top 20 语言静态语法表，One Light / One Dark 双色板
@@ -18,15 +19,20 @@ CI 由 `ci/check_launcher_icon.sh` 守门（几何硬指标 + res 与设计源�
 - 排版：字号 5 档、行距 3 档、阅读字体 3 种、强调色 5 色
 - 阅读增强：进度记忆、文内搜索、>5MB 提示、>20MB 拒绝、GBK/GB18030 识别
 - 导出分享：Markdown 原文 / 渲染后 HTML（FileProvider + 缓存清理）
+- 轻编辑：阅读页进入编辑、源码编辑、格式工具栏（粗体/斜体/标题/引用/列表/代码/链接/分割线）
+- 编辑保存：覆盖保存 / 另存为 / 新建 Markdown、编辑页同页预览、未保存离开确认
+- 编辑安全：编码与换行保持、只读 URI 重新授权、应用私有目录草稿兜底与设置页清理
 - 隐私：零权限、零网络代码路径、零追踪；关于页明示「本应用不收集任何数据」
 
 ## 技术架构
 
-- Kotlin + 原生 View + RecyclerView，单 Activity（首页/设置）+ ReaderActivity
+- Kotlin + 原生 View + RecyclerView，主 Activity（首页/设置）+ ReaderActivity + EditorActivity
 - 解析：`MarkdownParser.parse()` 使用 CommonMark 参考解析器
   （commonmark-java + GFM 表格/删除线扩展）并转换为自有 AST；
   自研 `BlockParser`/`InlineParser` 保留为容错后备（`parseLegacy()`）
 - 渲染：AST → `RenderPipeline` → RecyclerView 分批提交；行内样式统一 `SpanFactory`
+- 编辑：`EditorActivity` + 原生 `EditText`，`MarkdownEditCommands` 提供可单测的格式命令
+- 编辑存储：`DocumentTextCodec` / `DocumentWriter` 保持原编码与换行；`DraftStore` 私有草稿兜底
 - 存储：SharedPreferences（设置 + 最近记录 JSON），无数据库、无网络
 
 ## 依赖白名单（SPEC §1.1）
@@ -72,7 +78,7 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 → R8 打包 → 发布 GitHub Release」（约 5–10 分钟）：
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.1.0 && git push origin v1.1.0
 ```
 
 - 版本取自 tag：`v1.2.3` → `versionName=1.2.3`，`versionCode` 按 `1*10000+2*100+3=10203`
@@ -99,14 +105,16 @@ git tag v1.0.0 && git push origin v1.0.0
 
 ## 验证方式
 
-1. **功能**：安装 APK → 首页空状态 → SAF 打开 `.md` → 阅读页渲染；
+1. **阅读功能**：安装 APK → 首页空状态 → SAF 打开 `.md` → 阅读页渲染；
    点击大纲跳转、日/夜切换、字号/行距/字体/强调色设置即时生效。
-2. **外部唤起**：在系统文件管理器/第三方 App 中以「墨阅」打开 `.md`。
-3. **异常**：打开 GBK 文档验证中文零乱码；删除已授权文件后回首页标记「文件不存在」；
-   打开 >20MB 文件提示拒绝。
-4. **自动化**：见 `benchmark/README.md`；本仓库已运行全部 JVM 单测、
+2. **编辑功能**：阅读页点「编辑」→ 修改正文 → 预览/保存/另存为；
+   首页「新建 Markdown」→ 输入内容 → 首次保存时选择位置；返回时验证未保存确认与草稿恢复。
+3. **外部唤起**：在系统文件管理器/第三方 App 中以「墨阅」打开 `.md`。
+4. **异常**：打开 GBK 文档验证中文零乱码；删除已授权文件后回首页标记「文件不存在」；
+   打开 >20MB 文件提示拒绝；编辑 >1MB 文档提示仅阅读。
+5. **自动化**：见 `benchmark/README.md`；本仓库已运行全部 JVM 单测、
    `assembleDebug`、`assembleRelease`、`ci/check_no_network.sh` 与 `ci/check_launcher_icon.sh`。
-5. **图标**：`python3 tools/gen_launcher_icon.py --ascii` 终端校对字形，
+6. **图标**：`python3 tools/gen_launcher_icon.py --ascii` 终端校对字形，
    `--check` 看几何硬指标与 pathData 回读；装机后确认启动器 / 圆形遮罩 / 主题图标
    （Android 13+）三个入口的观感，若启动器缓存旧图标可重启启动器。
 

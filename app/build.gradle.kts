@@ -63,9 +63,9 @@ android {
         applicationId = "com.moread.app"
         minSdk = 26
         targetSdk = 34
-        // 本地默认 1.0 / 1；发布时由 CI 以 -PversionName / -PversionCode 覆盖（见文件顶部）。
-        versionCode = releaseVersionCode ?: 1
-        versionName = releaseVersionName ?: "1.0"
+        // 本地默认 1.1.0 / 10100；发布时由 CI 以 -PversionName / -PversionCode 覆盖（见文件顶部）。
+        versionCode = releaseVersionCode ?: 10100
+        versionName = releaseVersionName ?: "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
