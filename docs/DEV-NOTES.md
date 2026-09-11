@@ -65,4 +65,15 @@
 
 - 真机冷启动/内存/帧率与 SAF 图片子路径兼容性需在目标机型回归；
 - CommonMark 测试中 18 个失败例为参考渲染器与 spec.txt 的版本级差异，未影响主流程；
-- HTML 块按 SPEC 既定取舍转义为纯文本，不渲染富 HTML。
+- HTML 块按 SPEC 既定取舍转义为纯文本，不渲染富 HTML；
+- 图标预览图 `docs/brand/icon-masks|sizes|variants.png` 含文字标签，字形依赖本机字体，
+  换环境重出会得到「图形逐像素一致、标签字节不同」的 PNG；发布前请在目标机器上目视确认。
+
+## 七、品牌图标「墨井」的搭建与守门
+
+| # | 问题 | 处理方案 |
+| --- | --- | --- |
+| 1 | 规范 §5 交付物列了 `ic_launcher_round.xml`，但 manifest 只声明了 `android:icon` | 补 `android:roundIcon="@mipmap/ic_launcher_round"`：请求圆形图标的启动器走 roundIcon，其余回落 icon，两者共用同一套自适应图标。`aapt2 dump xmltree` 已确认 APK 内 `icon=@0x7f0c0000`、`roundIcon=@0x7f0c0001` 指向两个不同 mipmap。 |
+| 2 | `--check` 只打印报表，无论几何是否合规都以退出码 0 结束，「断言」名不副实 | 抽出 `drop_clearance()` 供报表与断言共用，新增 `hard_failures()`：安全区余量 <1、墨滴与笔画净空 <1、pathData 回读超差一律退出码 1（注入越界/贴笔两种故障均验证可拦下）。 |
+| 3 | 「改了设计源却忘了重出资源」「直接手改 res」都没有拦截手段 | 新增 `--verify`（只读）：把设计源当前输出与磁盘 res 逐字节比对；新增 `ci/check_launcher_icon.sh` 汇总「几何硬指标 + 资源一致性 + 交付物齐备 + 自适应三件套 + manifest 入口」五项，并接入 GitHub Actions 作为发布前置步骤。 |
+| 4 | 图标一致性如何验收 | `assembleDebug` / `assembleRelease` 均通过；release 包在 R8 + 资源压缩后仍带 `drawable/ic_launcher_{background,foreground,monochrome}` 与 `mipmap/ic_launcher{,_round}`，编译后的 pathData 与设计源字符串逐字一致；另按 SVG 语义独立解析已落地的 XML 并栅格化，与生成器渲染的覆盖率 IoU 为 0.992（井字）/ 0.986（墨滴），墨滴实测 8.86 × 12.02（规范 9.0 × 12.1）、内容最远点半径 30.37（生成器体检值 30.39）。 |

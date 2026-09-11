@@ -71,6 +71,7 @@
 | `app/src/main/res/drawable/ic_launcher_monochrome.xml` | 单色层（Android 13+ 主题图标） |
 | `app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` | 自适应图标声明 |
 | `app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml` | 圆形启动器入口 |
+| `app/src/main/AndroidManifest.xml` | 入口接线：`android:icon` + `android:roundIcon` |
 | `docs/brand/icon-512.png` | 512×512 主图（商店 / 物料） |
 | `docs/brand/icon-masks.png` | 圆形 / 方圆 / 圆角三种遮罩观感 |
 | `docs/brand/icon-sizes.png` | 48 / 32 / 24 / 16 dp 尺寸阶梯 |
@@ -78,10 +79,14 @@
 | `docs/brand/icon-monochrome.png` | 主题图标（单色层）示意 |
 | `docs/brand/icon-variants.png` | 墨底（默认）与纸白（备选）配色对比 |
 | `tools/gen_launcher_icon.py` | 几何唯一来源，生成上述全部产物 |
+| `ci/check_launcher_icon.sh` | CI 守门：几何硬指标 + res 与设计源一致 + manifest 入口 |
 
 ## 6. 适配说明
 
 - **自适应图标**：minSdk 26，所有目标设备均使用 108dp 自适应图标，无需位图回退。
+- **入口接线**：manifest 同时声明 `android:icon="@mipmap/ic_launcher"` 与
+  `android:roundIcon="@mipmap/ic_launcher_round"`——请求圆形图标的启动器走 `roundIcon`，
+  否则回落到 `icon`；两者指向同一套自适应图标，观感一致。
 - **遮罩**：圆形、方圆（squircle）、圆角方三种主流遮罩下均无裁切（余量 +2.61）。
 - **Android 13+ 主题图标**：已提供 `<monochrome>` 单色层，井心墨滴保留为剪影，
   系统着色后仍能看出「井中一点」。
@@ -98,10 +103,13 @@
 python3 tools/gen_launcher_icon.py            # 生成 XML 资源 + 预览图
 python3 tools/gen_launcher_icon.py --preview  # 只重出预览图
 python3 tools/gen_launcher_icon.py --check    # 几何体检 + pathData 回读校验
+python3 tools/gen_launcher_icon.py --verify   # 校验 res 未被手改（只读，CI 用）
 python3 tools/gen_launcher_icon.py --ascii    # 终端 ASCII 校对（无需看图）
+
+./ci/check_launcher_icon.sh                   # 上面两步 + 交付物/manifest 入口检查
 ```
 
-`--check` 会核对四项硬指标并断言 `pathData` 回读一致性：
+`--check` 会核对四项硬指标并断言 `pathData` 回读一致性（不通过即退出码 1）：
 
 ```
 最大半径 30.39 / 安全半径 33.0（余量 +2.61）
@@ -115,6 +123,15 @@ pathData 回读校验（墨滴）：最大偏差 0.0017 → OK
 > 回读校验会按 SVG 语义重新解析生成的 `pathData` 并与几何比对。
 > 圆弧的 `largeArc` 标志一旦写错（例如墨滴底部是 287° 的优弧却标成 `0`），
 > 偏差会立刻超标——这类错误在静态预览里看不出来，只有真机渲染才暴露。
+
+`--verify` 管的是另一件事：**磁盘上的 res 是否仍是设计源的输出**。手改 res、或改了
+`tools/gen_launcher_icon.py` 里的几何却忘了重出资源，都会以退出码 1 失败。
+CI（`.github/workflows/release.yml`）在单测之前跑 `ci/check_launcher_icon.sh`，
+把「几何硬指标 / 资源一致 / 交付物齐备 / 自适应三件套 / manifest 入口」一起作为发布前置条件。
+
+> 预览图 `docs/brand/*.png` 由 Pillow 栅格化，图形本身逐像素可复现，但
+> `icon-masks|sizes|variants.png` 上的文字标签依赖本机字体，字节会随环境变化；
+> 因此一致性校验只覆盖 XML 资源，不比对预览图字节。
 
 ## 8. 备选配色：纸白版
 

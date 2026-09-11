@@ -5,7 +5,8 @@
 
 品牌图标「墨井」：Markdown 的标题标记 `#` 在中文排版里叫「井字号」，
 写成书法四笔的「井」，井心悬一滴强调蓝的墨——规范见 `docs/BRAND-图标设计规范.md`，
-几何唯一来源与自检脚本为 `tools/gen_launcher_icon.py`。
+几何唯一来源与自检脚本为 `tools/gen_launcher_icon.py`，
+CI 由 `ci/check_launcher_icon.sh` 守门（几何硬指标 + res 与设计源逐字节一致 + manifest 入口接线）。
 
 ## 功能实现（PRD F-01 ~ F-13 全部落地）
 
@@ -53,6 +54,9 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 
 # 4. 安全红线检查（uses-permission=0、网络 API=0、APK 权限审计）
 ./ci/check_no_network.sh
+
+# 5. 品牌图标检查（几何硬指标、res 与设计源一致、manifest icon/roundIcon 接线）
+./ci/check_launcher_icon.sh
 ```
 
 产物：
@@ -64,8 +68,8 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 
 ## 发布（GitHub Actions 打包 → GitHub Release）
 
-仓库内置 `.github/workflows/release.yml`，推送版本 tag 即自动「单测 → 安全红线检查 → R8
-打包 → 发布 GitHub Release」（约 5–10 分钟）：
+仓库内置 `.github/workflows/release.yml`，推送版本 tag 即自动「品牌图标检查 → 单测 → 安全红线检查
+→ R8 打包 → 发布 GitHub Release」（约 5–10 分钟）：
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
@@ -101,7 +105,10 @@ git tag v1.0.0 && git push origin v1.0.0
 3. **异常**：打开 GBK 文档验证中文零乱码；删除已授权文件后回首页标记「文件不存在」；
    打开 >20MB 文件提示拒绝。
 4. **自动化**：见 `benchmark/README.md`；本仓库已运行全部 JVM 单测、
-   `assembleDebug`、`assembleRelease` 与 `ci/check_no_network.sh`。
+   `assembleDebug`、`assembleRelease`、`ci/check_no_network.sh` 与 `ci/check_launcher_icon.sh`。
+5. **图标**：`python3 tools/gen_launcher_icon.py --ascii` 终端校对字形，
+   `--check` 看几何硬指标与 pathData 回读；装机后确认启动器 / 圆形遮罩 / 主题图标
+   （Android 13+）三个入口的观感，若启动器缓存旧图标可重启启动器。
 
 ## 文档冲突与处理决策
 

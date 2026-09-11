@@ -118,6 +118,9 @@ jobs:
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "发布版本：$TAG（versionCode=$CODE）"
 
+      - name: 品牌图标检查（几何硬指标 + res 与设计源一致 + manifest 入口）
+        run: ./ci/check_launcher_icon.sh
+
       - name: 单元测试（CommonMark / fuzz / 编码 / 高亮）
         run: ./gradlew :app:testDebugUnitTest
 

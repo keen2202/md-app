@@ -18,8 +18,12 @@
     python3 tools/gen_launcher_icon.py --preview      # 只生成预览图
     python3 tools/gen_launcher_icon.py --ascii        # 终端 ASCII 校对（无需看图）
     python3 tools/gen_launcher_icon.py --check        # 只做安全区/几何体检
+    python3 tools/gen_launcher_icon.py --verify       # 校验 res 资源未被手改（CI 用，只读）
 
-依赖：Pillow（仅预览图需要；XML 生成与 --ascii/--check 只用标准库）。
+CI（ci/check_launcher_icon.sh）会依次跑 --check 与 --verify，
+保证「改了设计源却忘了重出资源」或「直接手改 res」都会在流水线上失败。
+
+依赖：Pillow（仅预览图需要；XML 生成与 --ascii/--check/--verify 只用标准库）。
 """
 
 from __future__ import annotations
@@ -438,6 +442,17 @@ def _svg_arc_points(start, end, rx, ry, large, sweep, steps: int = 48):
     ]
 
 
+def drop_clearance() -> float:
+    """墨滴轮廓到井字四笔的最小距离（>0 即不相接）。"""
+    drop_pts = flatten([drop_path()], steps=48)[0]
+    stroke_polys = flatten(stroke_paths(), steps=24)
+    return min(
+        min(_point_seg_distance(p, poly[i], poly[(i + 1) % len(poly)])
+            for poly in stroke_polys for i in range(len(poly)))
+        for p in drop_pts
+    )
+
+
 def geometry_report() -> list[str]:
     """输出可核对的几何指标：安全区越界、墨滴净空、笔画粗细。"""
     lines: list[str] = []
@@ -452,20 +467,49 @@ def geometry_report() -> list[str]:
     lines.append(f"内容包围盒 x {min(xs):.1f}–{max(xs):.1f}（宽 {max(xs) - min(xs):.1f}）"
                  f"  y {min(ys):.1f}–{max(ys):.1f}（高 {max(ys) - min(ys):.1f}）")
 
-    # 墨滴与四笔的最小净空
-    drop_pts = flatten([drop_path()], steps=48)[0]
-    stroke_polys = flatten(stroke_paths(), steps=24)
-    min_clear = min(
-        min(_point_seg_distance(p, poly[i], poly[(i + 1) % len(poly)])
-            for poly in stroke_polys for i in range(len(poly)))
-        for p in drop_pts
-    )
+    min_clear = drop_clearance()
     lines.append(f"墨滴与笔画最小净空 {min_clear:.2f}（>0 即不相接）")
 
     widths = [w for _, _, w, _ in STROKES]
     lines.append(f"笔画宽度 {min(widths):.1f}–{max(widths):.1f}"
                  f"（48dp 下约 {min(widths) / VIEWPORT * 48:.1f}–{max(widths) / VIEWPORT * 48:.1f}dp）")
     return lines
+
+
+MIN_SAFE_MARGIN = 1.0      # 安全区余量下限（108 画布坐标）
+MIN_DROP_CLEARANCE = 1.0   # 墨滴与笔画净空下限（>0 即不相接，此处留 1 的工程余量）
+
+
+def hard_failures() -> list[str]:
+    """硬指标断言：返回未通过项（空列表 = 全部通过）。
+
+    体检报表是给人看的，退出码才是给 CI 看的：几何越界、墨滴贴笔、
+    pathData 回读超差都必须让流水线失败，而不是只打印一行「不一致」。
+    """
+    failures: list[str] = []
+    all_pts = [pt for poly in flatten(glyph_paths()) for pt in poly]
+    radius = max(math.hypot(p[0] - CENTER[0], p[1] - CENTER[1]) for p in all_pts)
+    if SAFE_RADIUS - radius < MIN_SAFE_MARGIN:
+        failures.append(f"安全区余量不足：{SAFE_RADIUS - radius:+.2f} < {MIN_SAFE_MARGIN:.2f}")
+
+    clearance = drop_clearance()
+    if clearance < MIN_DROP_CLEARANCE:
+        failures.append(f"墨滴与笔画净空不足：{clearance:.2f} < {MIN_DROP_CLEARANCE:.2f}")
+
+    for line in verify_path_data():
+        if "→ OK" not in line:
+            failures.append(f"pathData 回读超差：{line}")
+    return failures
+
+
+def enforce_hard_metrics() -> None:
+    """硬指标不通过即以退出码 1 结束（--check / --verify 用）。"""
+    failures = hard_failures()
+    if failures:
+        print("硬指标未通过：")
+        for item in failures:
+            print(f"  · {item}")
+        raise SystemExit(1)
 
 
 # ——————————————————————————————————————————————————————————————
@@ -639,34 +683,77 @@ def ascii_preview(width: int = 58) -> None:
     print(f"（ASCII {width}×{height}，'#' = 笔画/墨滴，'+' = 墨底，'.' = 更深的墨底）")
 
 
+def verify_targets(root: str, targets: dict[str, str]) -> int:
+    """校验磁盘上的资源与设计源当前输出是否逐字节一致（CI 用，不写文件）。
+
+    返回不一致（含缺失）的文件数，0 表示 res 未偏离设计源。
+    只覆盖 XML 资源：预览 PNG 的栅格化结果依赖 Pillow 版本与系统字体，
+    允许存在肉眼不可辨的字节差异，故不参与一致性断言。
+    """
+    stale = 0
+    for path, expected in targets.items():
+        rel = os.path.relpath(path, root)
+        if not os.path.exists(path):
+            print(f"  · 缺失 {rel}")
+            stale += 1
+            continue
+        with open(path, encoding="utf-8") as fh:
+            actual = fh.read()
+        if actual == expected:
+            print(f"  · 一致 {rel}")
+        else:
+            print(f"  · 不一致 {rel}")
+            stale += 1
+    return stale
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="生成墨阅 MoRead 启动图标资源与预览图")
     parser.add_argument("--preview", action="store_true", help="只生成预览图，不改动 res/")
     parser.add_argument("--ascii", action="store_true", help="终端 ASCII 校对")
     parser.add_argument("--check", action="store_true", help="只做几何体检")
+    parser.add_argument("--verify", action="store_true",
+                        help="校验 res 资源与设计源逐字节一致（只读，CI 用）")
     parser.add_argument("--preview-dir", default=os.path.join("docs", "brand"))
     args = parser.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     res = os.path.join(root, "app", "src", "main", "res")
 
-    print("几何体检：")
-    for line in geometry_report():
-        print(f"  · {line}")
-    for line in verify_path_data():
-        print(f"  · {line}")
+    # 设计源当前输出：路径 → 文件内容。写入与校验共用同一份，避免两处漂移。
+    targets = {
+        os.path.join(res, "drawable", "ic_launcher_foreground.xml"): foreground_xml(),
+        os.path.join(res, "drawable", "ic_launcher_background.xml"): background_xml(),
+        os.path.join(res, "drawable", "ic_launcher_monochrome.xml"): monochrome_xml(),
+        os.path.join(res, "mipmap-anydpi-v26", "ic_launcher.xml"): ADAPTIVE_XML,
+        os.path.join(res, "mipmap-anydpi-v26", "ic_launcher_round.xml"): ADAPTIVE_XML,
+    }
+
+    # --verify 只报「一致性」结论：几何数字已由 CI 上一步的 --check 打印过，
+    # 硬指标不通过时 enforce_hard_metrics() 会自己把失败原因写清楚。
+    if not args.verify:
+        print("几何体检：")
+        for line in geometry_report():
+            print(f"  · {line}")
+        for line in verify_path_data():
+            print(f"  · {line}")
 
     if args.check:
+        enforce_hard_metrics()
+        return
+
+    if args.verify:
+        enforce_hard_metrics()
+        print("资源一致性校验（res ← 设计源）：")
+        stale = verify_targets(root, targets)
+        if stale:
+            print(f"校验失败：{stale} 个资源与设计源不一致；"
+                  f"运行 python3 tools/gen_launcher_icon.py 重新生成。")
+            raise SystemExit(1)
+        print(f"校验通过：{len(targets)} 个图标资源与设计源逐字节一致。")
         return
 
     if not args.preview:
-        targets = {
-            os.path.join(res, "drawable", "ic_launcher_foreground.xml"): foreground_xml(),
-            os.path.join(res, "drawable", "ic_launcher_background.xml"): background_xml(),
-            os.path.join(res, "drawable", "ic_launcher_monochrome.xml"): monochrome_xml(),
-            os.path.join(res, "mipmap-anydpi-v26", "ic_launcher.xml"): ADAPTIVE_XML,
-            os.path.join(res, "mipmap-anydpi-v26", "ic_launcher_round.xml"): ADAPTIVE_XML,
-        }
         for path, content in targets.items():
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(content)
